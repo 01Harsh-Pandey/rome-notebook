@@ -1048,10 +1048,11 @@ def _(trace_btn, trace_fact_ui, trace_samples_ui,
     else:
         _fact_t = FACTS_BY_ID[trace_fact_ui.value]
         with mo.status.spinner(
-            title="Loading causal-tracer + running trace… (~60 s)",
+            title="Running causal trace… (~60 s)",
         ):
             from causal_tracer import CausalTracer
-            _tr  = CausalTracer(MODEL_NAME)
+            # Pass already-loaded model + tokenizer — no extra VRAM needed
+            _tr  = CausalTracer(model, tokenizer)
             _res = _tr.calculate_hidden_flow(
                 prompt=_fact_t["prompt"],
                 subject=_fact_t["subject"],
