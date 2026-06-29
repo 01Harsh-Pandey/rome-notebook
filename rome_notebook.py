@@ -466,7 +466,7 @@ def _(FACT_OPTIONS, PRESET_FACTS, mo):
     # .value returns the fact id ("eiffel", "lebron", "gates")
     fact_selector = mo.ui.dropdown(
         options=FACT_OPTIONS,
-        value=list(FACT_OPTIONS.values())[0],   # default = first id
+        value=list(FACT_OPTIONS.keys())[0],  # KEY = label (what .value param needs)
         label="Select a factual prompt",
         full_width=True,
     )
@@ -1012,7 +1012,7 @@ def _(mo):
 def _(FACT_OPTIONS, PRESET_FACTS, mo):
     trace_fact_ui = mo.ui.dropdown(
         options=FACT_OPTIONS,
-        value=list(FACT_OPTIONS.values())[0],
+        value=list(FACT_OPTIONS.keys())[0],  # KEY = label shown to user
         label="Fact to trace",
         full_width=True,
     )
