@@ -9,14 +9,13 @@
 #   "anywidget>=0.9.0",
 #   "traitlets>=5.0",
 #   "numpy>=1.24",
-#   "plotly>=6.0.0",
 # ]
 # ///
 
 import marimo
 
 __generated_with = "0.23.2"
-app = marimo.App(width="medium", css_file="", auto_download=["html"])
+app = marimo.App(width="medium", auto_download=["html"])
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -25,15 +24,12 @@ app = marimo.App(width="medium", css_file="", auto_download=["html"])
 
 @app.cell(hide_code=True)
 def _():
-    import copy
-    import html as html_lib
+    import inspect
     import json
 
     import anywidget
     import numpy as np
-    import plotly.graph_objects as go
     import torch
-    import torch.nn.functional as F
     import traitlets
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -44,8 +40,7 @@ def _():
         torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU"
     )
     return (
-        F, anywidget, copy, go, html_lib, json,
-        np, torch, traitlets,
+        anywidget, inspect, json, np, torch, traitlets,
         AutoModelForCausalLM, AutoTokenizer,
         mo, DEVICE, GPU_NAME,
     )
@@ -56,9 +51,9 @@ def _():
 # ─────────────────────────────────────────────────────────────────────────────
 
 @app.cell(hide_code=True)
-def _(mo):
+def _():
     MODEL_NAME         = "gpt2-xl"
-    ROME_LAYER_DEFAULT = 17
+    ROME_LAYER_DEFAULT = 17   # used only before any trace has run
 
     PRESET_FACTS = [
         {
@@ -128,12 +123,11 @@ def _(mo):
             ],
         },
     ]
-    FACTS_BY_ID = {f["id"]: f for f in PRESET_FACTS}
-
-    # Dropdown options: {label_shown_to_user: value_returned_by_.value}
+    FACTS_BY_ID  = {f["id"]: f for f in PRESET_FACTS}
+    # Dropdown convention: {label_shown_to_user: value_returned_by_.value}
     FACT_OPTIONS = {f["prompt"] + "  →  ?": f["id"] for f in PRESET_FACTS}
 
-    return MODEL_NAME, ROME_LAYER_DEFAULT, PRESET_FACTS, FACTS_BY_ID, FACT_OPTIONS, mo
+    return MODEL_NAME, ROME_LAYER_DEFAULT, PRESET_FACTS, FACTS_BY_ID, FACT_OPTIONS
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -145,86 +139,39 @@ def _(GPU_NAME, mo):
     _banner = f"""
     <style>
       .rome-hero {{
-        border: 1px solid #d0d7de;
-        border-radius: 12px;
-        overflow: hidden;
-        box-shadow: 0 6px 18px rgba(15,23,42,.10);
-        margin-bottom: 20px;
+        border: 1px solid #d0d7de; border-radius: 12px; overflow: hidden;
+        box-shadow: 0 6px 18px rgba(15,23,42,.10); margin-bottom: 20px;
       }}
       .rome-hero-grid {{
-        display: grid;
-        grid-template-columns: minmax(0, 1.3fr) minmax(240px, 0.7fr);
-        gap: 20px;
-        padding: 28px 26px;
-        background: #fff;
+        display: grid; grid-template-columns: minmax(0,1.3fr) minmax(240px,.7fr);
+        gap: 20px; padding: 28px 26px; background: #fff;
       }}
       @media (max-width: 680px) {{
         .rome-hero-grid {{ grid-template-columns: 1fr; padding: 20px 16px; }}
       }}
       .rome-badge {{
-        display: inline-flex; align-items: center; gap: 6px;
-        padding: 5px 10px;
-        border: 1px solid #bfdbfe;
-        background: rgba(239,246,255,.85);
-        border-radius: 999px;
-        color: #1d4ed8;
-        font-size: .74rem; font-weight: 800; text-transform: uppercase;
-        letter-spacing: .04em; margin-bottom: 12px;
+        display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px;
+        border: 1px solid #bfdbfe; background: rgba(239,246,255,.85);
+        border-radius: 999px; color: #1d4ed8; font-size: .74rem; font-weight: 800;
+        text-transform: uppercase; letter-spacing: .04em; margin-bottom: 12px;
       }}
-      .rome-title {{
-        margin: 0 0 10px;
-        color: #111827;
-        font-size: 2.2rem;
-        font-weight: 850;
-        line-height: 1.08;
-      }}
-      .rome-desc {{
-        margin: 0 0 16px;
-        color: #374151;
-        font-size: 1rem;
-        line-height: 1.55;
-        max-width: 560px;
-      }}
-      .rome-meta {{
-        color: #475569;
-        font-size: .9rem;
-        line-height: 1.7;
-      }}
-      .rome-meta a {{
-        color: #2563eb; text-decoration: none; font-weight: 700;
-      }}
-      .rome-card {{
-        display: flex; flex-direction: column;
-        justify-content: space-between; gap: 12px;
-        border: 1px solid rgba(148,163,184,.35);
-        background: rgba(248,250,252,.9);
-        border-radius: 8px;
-        padding: 14px 14px 12px;
-        box-shadow: 0 4px 12px rgba(148,163,184,.12);
-      }}
-      .rome-card-label {{
-        color: #64748b; font-size: .72rem; font-weight: 850;
-        text-transform: uppercase; letter-spacing: .04em; margin-bottom: 5px;
-      }}
-      .rome-card-title {{
-        font-size: .95rem; font-weight: 800; color: #111827; line-height: 1.3;
-      }}
-      .rome-card-authors {{
-        margin-top: 5px; color: #475569; font-size: .88rem;
-      }}
-      .rome-card-link {{
-        display: inline-block; margin-top: 7px;
-        color: #2563eb; font-size: .88rem; font-weight: 700;
-        text-decoration: none;
-      }}
-      .rome-gpu {{
-        margin-top: 10px;
-        padding: 7px 10px;
-        background: #f0fdf4;
-        border: 1px solid #bbf7d0;
-        border-radius: 6px;
-        font-size: .8rem; color: #166534; font-weight: 700;
-      }}
+      .rome-title {{ margin: 0 0 10px; color: #111827; font-size: 2.2rem;
+        font-weight: 850; line-height: 1.08; }}
+      .rome-desc {{ margin: 0 0 16px; color: #374151; font-size: 1rem;
+        line-height: 1.55; max-width: 560px; }}
+      .rome-meta {{ color: #475569; font-size: .9rem; line-height: 1.7; }}
+      .rome-card {{ display: flex; flex-direction: column; justify-content: space-between;
+        gap: 12px; border: 1px solid rgba(148,163,184,.35); background: rgba(248,250,252,.9);
+        border-radius: 8px; padding: 14px 14px 12px; box-shadow: 0 4px 12px rgba(148,163,184,.12); }}
+      .rome-card-label {{ color: #64748b; font-size: .72rem; font-weight: 850;
+        text-transform: uppercase; letter-spacing: .04em; margin-bottom: 5px; }}
+      .rome-card-title {{ font-size: .95rem; font-weight: 800; color: #111827; line-height: 1.3; }}
+      .rome-card-authors {{ margin-top: 5px; color: #475569; font-size: .88rem; }}
+      .rome-card-link {{ display: inline-block; margin-top: 7px; color: #2563eb;
+        font-size: .88rem; font-weight: 700; text-decoration: none; }}
+      .rome-gpu {{ margin-top: 10px; padding: 7px 10px; background: #f0fdf4;
+        border: 1px solid #bbf7d0; border-radius: 6px; font-size: .8rem;
+        color: #166534; font-weight: 700; }}
     </style>
     <div class="rome-hero">
       <div class="rome-hero-grid">
@@ -236,12 +183,12 @@ def _(GPU_NAME, mo):
             </span>
           </h1>
           <p class="rome-desc">
-            Every fact a language model knows has a precise address: a handful of
-            neurons at a specific layer and token position. This notebook finds that
-            address via <strong>causal tracing</strong>, then
-            surgically rewrites the fact with a
-            <strong>rank-one weight update</strong> — under a second,
-            no retraining, all other knowledge intact.
+            Every fact a language model knows has a precise address: a handful
+            of neurons at a specific layer and token position. This notebook
+            finds that address by <strong>clicking on it</strong> — then uses
+            the very cell you clicked to drive a
+            <strong>rank-one weight update</strong> that rewrites the fact in
+            under a second, with all other knowledge left intact.
           </p>
           <div class="rome-meta">
             <div>NeurIPS 2022 &nbsp;·&nbsp; Meng, Bau, Andonian &amp; Belinkov</div>
@@ -257,36 +204,34 @@ def _(GPU_NAME, mo):
             <div class="rome-card-authors">
               Kevin Meng · David Bau<br>Alex Andonian · Yonatan Belinkov
             </div>
-            <a class="rome-card-link"
-               href="https://www.alphaxiv.org/abs/2202.05262">
+            <a class="rome-card-link" href="https://www.alphaxiv.org/abs/2202.05262">
               alphaxiv:2202.05262
             </a>
           </div>
           <svg viewBox="0 0 260 120" role="img"
-               aria-label="Factual memory edit: weight matrix with a highlighted neuron"
+               aria-label="Weight matrix with a highlighted neuron being edited"
                style="width:100%;height:auto;display:block;margin-top:6px;">
             <defs>
               <radialGradient id="rome-glow" cx="50%" cy="50%" r="55%">
-                <stop offset="0%"   stop-color="#fff"    stop-opacity=".98"/>
-                <stop offset="45%"  stop-color="#bfdbfe" stop-opacity=".75"/>
+                <stop offset="0%" stop-color="#fff" stop-opacity=".98"/>
+                <stop offset="45%" stop-color="#bfdbfe" stop-opacity=".75"/>
                 <stop offset="100%" stop-color="#bbf7d0" stop-opacity="0"/>
               </radialGradient>
-              <radialGradient id="rome-red" cx="38%" cy="35%" r="68%">
-                <stop offset="0%" stop-color="#fff"    stop-opacity=".9"/>
-                <stop offset="100%" stop-color="#ef4444" stop-opacity=".9"/>
-              </radialGradient>
               <radialGradient id="rome-blue" cx="38%" cy="35%" r="68%">
-                <stop offset="0%" stop-color="#fff"    stop-opacity=".9"/>
+                <stop offset="0%" stop-color="#fff" stop-opacity=".9"/>
                 <stop offset="100%" stop-color="#60a5fa" stop-opacity=".9"/>
               </radialGradient>
               <filter id="rome-shadow" x="-40%" y="-40%" width="180%" height="180%">
                 <feDropShadow dx="0" dy="4" stdDeviation="4"
                   flood-color="#64748b" flood-opacity=".2"/>
               </filter>
+              <marker id="rome-arr" markerWidth="6" markerHeight="6"
+                refX="5" refY="3" orient="auto">
+                <path d="M0,0 L6,3 L0,6 Z" fill="#ef4444"/>
+              </marker>
             </defs>
             <rect x="0" y="0" width="260" height="120" rx="7" fill="#f8fafc"/>
             <circle cx="130" cy="60" r="65" fill="url(#rome-glow)"/>
-            <!-- Weight matrix grid -->
             <g opacity=".35" stroke="#94a3b8" stroke-width=".8">
               <line x1="70" y1="20" x2="70" y2="100"/>
               <line x1="90" y1="20" x2="90" y2="100"/>
@@ -296,44 +241,24 @@ def _(GPU_NAME, mo):
               <line x1="50" y1="65" x2="130" y2="65"/>
               <line x1="50" y1="80" x2="130" y2="80"/>
             </g>
-            <!-- Highlighted neuron (the edit target) -->
             <rect x="70" y="50" width="20" height="15" rx="2"
               fill="#fef08a" stroke="#eab308" stroke-width="1.5"
               filter="url(#rome-shadow)"/>
-            <!-- Layer label -->
-            <text x="90" y="112" text-anchor="middle"
-              font-size="9" fill="#64748b" font-weight="700">
-              Layer 17 · subject last token
-            </text>
-            <!-- Arrow pointing to edit -->
+            <text x="90" y="112" text-anchor="middle" font-size="9"
+              fill="#64748b" font-weight="700">Layer 17 · subject last token</text>
             <path d="M155 57 L125 57" stroke="#ef4444" stroke-width="1.8"
               marker-end="url(#rome-arr)" fill="none"/>
-            <defs>
-              <marker id="rome-arr" markerWidth="6" markerHeight="6"
-                refX="5" refY="3" orient="auto">
-                <path d="M0,0 L6,3 L0,6 Z" fill="#ef4444"/>
-              </marker>
-            </defs>
-            <!-- Edit pencil -->
             <g transform="translate(155,45)">
               <rect x="0" y="0" width="28" height="10" rx="2"
                 fill="url(#rome-blue)" stroke="#fff" stroke-width="1"/>
-              <text x="14" y="8" text-anchor="middle"
-                font-size="7.5" fill="#1e3a5f" font-weight="800">
-                ROME edit
-              </text>
+              <text x="14" y="8" text-anchor="middle" font-size="7.5"
+                fill="#1e3a5f" font-weight="800">ROME edit</text>
             </g>
-            <!-- Token labels -->
-            <text x="70" y="17" text-anchor="middle"
-              font-size="8" fill="#475569">The</text>
-            <text x="90" y="17" text-anchor="middle"
-              font-size="8" fill="#2563eb" font-weight="700">Tower</text>
-            <text x="110" y="17" text-anchor="middle"
-              font-size="8" fill="#475569">is</text>
+            <text x="70" y="17" text-anchor="middle" font-size="8" fill="#475569">The</text>
+            <text x="90" y="17" text-anchor="middle" font-size="8" fill="#2563eb" font-weight="700">Tower</text>
+            <text x="110" y="17" text-anchor="middle" font-size="8" fill="#475569">is</text>
           </svg>
-          <div class="rome-gpu">
-            ⚡ Running on {GPU_NAME}
-          </div>
+          <div class="rome-gpu">⚡ Running on {GPU_NAME}</div>
         </div>
       </div>
     </div>
@@ -342,27 +267,22 @@ def _(GPU_NAME, mo):
     return
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# NARRATIVE
-# ─────────────────────────────────────────────────────────────────────────────
-
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    **Reader's note.** Run all cells top-to-bottom. GPU ops are gated behind
-    explicit buttons. Cells that depend on GPU results show a blue callout until
-    they have data to display.
+    **Reader's note.** Run all cells top-to-bottom. GPU work is gated behind
+    explicit buttons. The causal-trace heatmap in Step 3 is *clickable* — the
+    cell you click becomes the layer ROME edits in Step 4, no separate slider
+    to keep in sync.
 
     ---
 
     ## The Problem: Facts Are Frozen in Weights
 
-    After pretraining, a language model like GPT-2 XL *knows* that the Eiffel
-    Tower is in Paris. That knowledge lives in its 1.5 billion parameters as a
-    pattern of floating-point numbers. Now the fact changes — or turns out to be
-    wrong — or is copyrighted and must be removed.
-
-    The options are grim:
+    After pretraining, GPT-2 XL *knows* the Eiffel Tower is in Paris — that
+    knowledge lives as a pattern across 1.5 billion parameters. Now the fact
+    needs to change, or turns out to be wrong, or is copyrighted and must be
+    removed. The options are grim:
 
     | Approach | Cost | Risk |
     |----------|------|------|
@@ -370,15 +290,10 @@ def _(mo):
     | **Fine-tuning on corrected data** | Days | Catastrophic forgetting |
     | **ROME** | < 60 seconds | Surgically precise |
 
-    ROME (Rank-One Model Editing) works because each fact has a *precise address*
-    inside the model. Find the address. Write a new value at that address. Done.
-
-    The paper's key contributions:
-
-    1. **Causal tracing** — a method to locate the exact (layer, token) pair
-       responsible for any factual association
-    2. **Rank-one editing** — the minimum-norm weight update that rewrites
-       a single fact without touching anything else
+    ROME works because each fact has a *precise address* inside the model.
+    The paper's two contributions, which this notebook lets you operate
+    directly: **causal tracing** to find the address, and **rank-one
+    editing** to overwrite it.
     """)
     return
 
@@ -445,28 +360,26 @@ def _(load_btn, MODEL_NAME, DEVICE,
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STEP 2 — LIVE FACT PROBE
+# STEP 2 — SELECT A FACT, PROBE THE MODEL
 # ─────────────────────────────────────────────────────────────────────────────
 
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
     ---
-    ## Step 2 — Probe the Model's Knowledge
+    ## Step 2 — Pick a Fact
 
-    Select any of the three preset facts. The model answers live.
-    This is what you're about to surgically rewrite.
+    This selector drives everything below: the live probe, the causal
+    trace, and the edit. Select once.
     """)
     return
 
 
 @app.cell(hide_code=True)
-def _(FACT_OPTIONS, PRESET_FACTS, mo):
-    # FACT_OPTIONS = {label_displayed: id_returned}
-    # .value returns the fact id ("eiffel", "lebron", "gates")
+def _(FACT_OPTIONS, mo):
     fact_selector = mo.ui.dropdown(
         options=FACT_OPTIONS,
-        value=list(FACT_OPTIONS.keys())[0],  # KEY = label (what .value param needs)
+        value=list(FACT_OPTIONS.keys())[0],   # KEY = label shown to user
         label="Select a factual prompt",
         full_width=True,
     )
@@ -480,7 +393,7 @@ def _(fact_selector, FACTS_BY_ID, model, tokenizer, DEVICE, torch, mo):
         fact_view = mo.md("Load the model in Step 1.").callout(kind="info")
         current_fact = None
     else:
-        # fact_selector.value returns the id because FACT_OPTIONS = {label: id}
+        # FACT_OPTIONS = {label: id} → fact_selector.value returns the id
         current_fact = FACTS_BY_ID[fact_selector.value]
 
         with torch.no_grad():
@@ -494,12 +407,10 @@ def _(fact_selector, FACTS_BY_ID, model, tokenizer, DEVICE, torch, mo):
         _maxp   = max(_values)
 
         _bars = "".join(
-            f"""<div style="display:flex;align-items:center;gap:8px;
-                margin:5px 0;">
+            f"""<div style="display:flex;align-items:center;gap:8px;margin:5px 0;">
               <code style="width:110px;text-align:right;font-size:13px;
                   color:#111827;flex-shrink:0;">{repr(t)}</code>
-              <div style="flex:1;background:#f1f5f9;border-radius:4px;
-                  height:22px;overflow:hidden;">
+              <div style="flex:1;background:#f1f5f9;border-radius:4px;height:22px;overflow:hidden;">
                 <div style="width:{min(p/_maxp*100,100):.1f}%;
                     background:{'#2563eb' if t.strip().lower()==current_fact['true'].lower() else '#94a3b8'};
                     height:100%;border-radius:4px;"></div>
@@ -512,11 +423,9 @@ def _(fact_selector, FACTS_BY_ID, model, tokenizer, DEVICE, torch, mo):
         _correct = _tokens[0].strip().lower() == current_fact["true"].lower()
 
         fact_view = mo.Html(f"""
-        <div style="border:1px solid #d0d7de;border-radius:8px;
-            padding:14px 16px;background:#fff;
-            box-shadow:0 2px 8px rgba(15,23,42,.06);">
-          <div style="font-size:12px;color:#64748b;
-              font-family:monospace;margin-bottom:10px;">
+        <div style="border:1px solid #d0d7de;border-radius:8px;padding:14px 16px;
+            background:#fff;box-shadow:0 2px 8px rgba(15,23,42,.06);">
+          <div style="font-size:12px;color:#64748b;font-family:monospace;margin-bottom:10px;">
             {current_fact['prompt']} ___
           </div>
           {_bars}
@@ -533,66 +442,386 @@ def _(fact_selector, FACTS_BY_ID, model, tokenizer, DEVICE, torch, mo):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STEP 3 — CONFIGURE AND APPLY THE ROME EDIT
+# STEP 3 — CAUSAL TRACE: A CLICKABLE HEATMAP
 # ─────────────────────────────────────────────────────────────────────────────
 
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
     ---
-    ## Step 3 — Apply the ROME Edit
+    ## Step 3 — Causal Tracing: Click to Find the Fact's Address
 
-    **The algorithm in three steps:**
+    The paper locates a fact with **causal mediation analysis**:
 
-    1. **Key vector $k^*$** — run the model on the prompt with *noisy* subject
-       embeddings 20 times. Average the MLP hidden activation at the subject's
-       last token. This gives a subject-generic key that doesn't overfit to one prompt.
+    - **Clean run** — normal prompt → P(*Paris*) is high
+    - **Corrupt run** — noise added to the subject's token embeddings →
+      P(*Paris*) collapses near zero
+    - **Patch run** — at each *(layer $\ell$, token $t$)* pair, restore the
+      clean activation and remeasure how much P(*Paris*) recovers
 
-    2. **Value vector $v^*$** — gradient-optimise $v$ so that when it is injected
-       as the MLP output at the subject's position, the model maximises
-       $P(\text{target\_new})$ across several paraphrase prompts.
+    $$\text{Indirect Effect}(\ell, t) =
+    \frac{P_{\text{patched}} - P_{\text{corrupted}}}{P_{\text{clean}} - P_{\text{corrupted}}}$$
 
-    3. **Rank-one update** — for GPT-2's `Conv1D` weight $W$ (shape 6400 × 1600):
+    The result is a heatmap over layers × token positions — the fact's
+    address, visible to the naked eye.
 
-    $$W' = W + \frac{(v^* - k^{*\top} W)\, k^{*}}{\|k^*\|^2}$$
-
-    This is the *minimum-norm* change: it redirects exactly the key direction
-    $k^*$ and leaves every other direction mathematically unchanged.
+    **Click any cell once the trace finishes.** That cell becomes the layer
+    ROME targets in Step 4 below — there's no separate slider to keep in sync.
     """)
     return
 
 
 @app.cell(hide_code=True)
-def _(ROME_LAYER_DEFAULT, mo):
+def _(mo):
+    trace_samples_ui = mo.ui.slider(
+        10, 40, value=20, step=5, show_value=True,
+        label="Noise samples  (higher → smoother heatmap, slower)",
+    )
+    trace_samples_ui
+    return (trace_samples_ui,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    trace_btn = mo.ui.run_button(
+        label="🔍  Run Causal Trace  (~60 s)",
+        kind="warn", full_width=True,
+    )
+    trace_btn
+    return (trace_btn,)
+
+
+@app.cell(hide_code=True)
+def _(trace_btn, current_fact, trace_samples_ui,
+      MODEL_NAME, model, tokenizer, torch, inspect, mo):
+    if not trace_btn.value:
+        trace_result = None
+        trace_view = mo.md(
+            "Click **Run Causal Trace** to map where this fact is stored."
+        ).callout(kind="info")
+    elif current_fact is None or model is None:
+        trace_result = None
+        trace_view = mo.md("Load the model and pick a fact first.").callout(kind="warn")
+    else:
+        with mo.status.spinner(title="Running causal trace… (~60 s)"):
+            from causal_tracer import CausalTracer
+
+            # Reuse the already-loaded model/tokenizer — no extra VRAM.
+            _tr = CausalTracer(model, tokenizer)
+
+            # The installed causal-tracer version's method signature isn't
+            # guaranteed across releases (its constructor already differs
+            # from older docs). Introspect the real signature rather than
+            # hard-coding kwarg names, so this notebook tolerates version
+            # drift instead of crashing on it.
+            _sig    = inspect.signature(_tr.calculate_hidden_flow)
+            _params = set(_sig.parameters.keys())
+            _candidates = {
+                "prompt":      current_fact["prompt"],
+                "subject":     current_fact["subject"],
+                "samples":     trace_samples_ui.value,
+                "noise":       0.13,
+                "noise_level": 0.13,
+                "noise_std":   0.13,
+                "std":         0.13,
+                "sigma":       0.13,
+            }
+            _call_kwargs = {k: v for k, v in _candidates.items() if k in _params}
+            _missing = [
+                p.name for p in _sig.parameters.values()
+                if p.default is inspect.Parameter.empty
+                and p.name not in _call_kwargs and p.name != "self"
+            ]
+
+            if _missing:
+                trace_result = None
+                trace_view = mo.md(
+                    f"⚠️ **API mismatch.** This installed `causal-tracer` needs "
+                    f"`{_missing}`, which this notebook doesn't supply. "
+                    f"Detected signature: `{_sig}`."
+                ).callout(kind="danger")
+            else:
+                _res = _tr.calculate_hidden_flow(**_call_kwargs)
+
+                # Verified shape: (n_tokens, n_layers)
+                _scores = _res.scores.numpy()
+                _tokens = list(_res.input_tokens)
+                _srange = tuple(_res.subject_range)
+                del _tr
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+
+                _sl      = _srange[1] - 1
+                _top_lay = int(_scores[_sl, :].argmax())
+                _top_scr = float(_scores[_sl, :].max())
+
+                trace_result = {
+                    "scores":    _scores,
+                    "tokens":    _tokens,
+                    "srange":    _srange,
+                    "top_layer": _top_lay,
+                    "top_score": _top_scr,
+                    "prompt":    current_fact["prompt"],
+                }
+                trace_view = mo.md(
+                    f"✅ **Trace complete.** "
+                    f"Shape `{_scores.shape}` (tokens × layers) · "
+                    f"Paper-predicted peak: **layer {_top_lay}** "
+                    f"(indirect effect = {_top_scr:.3f}) — "
+                    f"click that cell below, or any other, to target it."
+                ).callout(kind="success")
+
+    trace_view
+    return trace_result, trace_view
+
+
+# ─── Causal Heatmap Widget — click sets the edit layer directly ────────────
+
+@app.cell(hide_code=True)
+def _(anywidget, traitlets):
+    class CausalHeatmapWidget(anywidget.AnyWidget):
+        """
+        Interactive causal-trace heatmap.
+        scores[t][l] = indirect effect for token t at layer l.
+        X = token position, Y = layer (0 at bottom).
+
+        Clicking a cell sets `selected_layer` / `selected_token` and pushes
+        the change back to Python via model.set + save_changes — the same
+        pattern used to drive a live readout from a single user gesture.
+        The computed paper-peak cell is shown with a dashed amber ring;
+        the user's current click is a solid blue ring. They can be the
+        same cell or different ones.
+        """
+        _esm = r"""
+        export default {
+          render({ model, el }) {
+            function draw() {
+              const raw = model.get("hm_data");
+              if (!raw) { el.innerHTML = ""; return; }
+              const { scores, tokens, subject_range, top_layer } = JSON.parse(raw);
+              const nT = tokens.length, nL = scores[0].length;
+              const CW = Math.max(9,  Math.floor(620 / nT));
+              const CH = Math.max(4,  Math.floor(260 / nL));
+              const PL = 38, PR = 72, PT = 18, PB = 68;
+              const W  = PL + nT*CW + PR, H = PT + nL*CH + PB;
+              const [ss, se] = subject_range;
+              const sl = se - 1;
+
+              let selLayer = model.get("selected_layer");
+              let selToken = model.get("selected_token");
+              if (selLayer < 0) { selLayer = top_layer; selToken = sl; }
+
+              function col(s) {
+                const t = Math.min(1, Math.max(0, s));
+                return `rgb(${Math.round(255-t*186)},${Math.round(255-t*185)},${Math.round(255-t*26)})`;
+              }
+
+              let cells = "", tlabs = "", lticks = "";
+              for (let t = 0; t < nT; t++)
+                for (let l = 0; l < nL; l++) {
+                  const x = PL + t*CW, y = PT + (nL-1-l)*CH;
+                  const isPaperPeak = (t === sl && l === top_layer);
+                  const isSelected  = (t === selToken && l === selLayer);
+                  let stroke = "none", sw = 0, dash = "";
+                  if (isPaperPeak) { stroke = "#d97706"; sw = 1.6; dash = '2,2'; }
+                  if (isSelected)  { stroke = "#2563eb"; sw = 2.2; dash = ""; }
+                  cells += `<rect x="${x}" y="${y}" width="${CW-1}" height="${CH-1}"
+                    fill="${col(scores[t][l])}"
+                    stroke="${stroke}" stroke-width="${sw}"
+                    stroke-dasharray="${dash}" rx="1"
+                    data-t="${t}" data-l="${l}" data-s="${scores[t][l].toFixed(3)}"
+                    class="hmcell" style="cursor:pointer;"/>`;
+                }
+
+              for (let t = 0; t < nT; t++) {
+                const cx = PL + t*CW + CW/2, ty = PT + nL*CH + 12;
+                const subj = t>=ss && t<se;
+                tlabs += `<text x="${cx}" y="${ty}" text-anchor="end" font-size="11"
+                  fill="${subj?"#2563eb":"#475569"}" font-weight="${subj?"700":"400"}"
+                  transform="rotate(-45,${cx},${ty})">${tokens[t]}</text>`;
+              }
+              for (let l = 0; l < nL; l += 8) {
+                const ty = PT + (nL-1-l)*CH + CH/2 + 4;
+                lticks += `<text x="${PL-4}" y="${ty}" text-anchor="end"
+                  font-size="10" fill="#475569">${l}</text>`;
+              }
+
+              el.innerHTML = `
+              <div style="border:1px solid #d0d7de;border-radius:8px;background:#fff;
+                  padding:12px 14px;box-shadow:0 2px 8px rgba(15,23,42,.06);">
+                <div style="overflow-x:auto;">
+                  <svg width="${W}" height="${H}" style="display:block;max-width:100%;">
+                    ${cells}${tlabs}${lticks}
+                    <text x="13" y="${PT+nL*CH/2}" text-anchor="middle" font-size="11"
+                      fill="#475569" transform="rotate(-90,13,${PT+nL*CH/2})">Layer</text>
+                    <text x="${PL+nT*CW/2}" y="${H-3}" text-anchor="middle"
+                      font-size="11" fill="#475569">← Token position →</text>
+                  </svg>
+                </div>
+                <div style="font-size:11px;color:#64748b;margin-top:5px;">
+                  🔵 Blue solid ring = your selection &nbsp;·&nbsp;
+                  🟠 Amber dashed ring = paper-predicted peak &nbsp;·&nbsp;
+                  Bright = high indirect effect
+                </div>
+                <div id="htip" style="font-family:monospace;font-size:12px;
+                  color:#111827;min-height:18px;margin-top:4px;"></div>
+              </div>`;
+
+              const tip = el.querySelector("#htip");
+              el.querySelectorAll(".hmcell").forEach(c => {
+                c.addEventListener("mouseover", () => {
+                  tip.textContent =
+                    `Token "${tokens[+c.dataset.t]}" · Layer ${c.dataset.l} · `
+                    + `Indirect effect = ${c.dataset.s}`;
+                });
+                c.addEventListener("click", () => {
+                  model.set("selected_layer", +c.dataset.l);
+                  model.set("selected_token", +c.dataset.t);
+                  model.save_changes();
+                });
+              });
+            }
+            draw();
+            model.on("change:hm_data", draw);
+            model.on("change:selected_layer", draw);
+            model.on("change:selected_token", draw);
+          }
+        };
+        """
+        _css = ".hmcell:hover{opacity:.7}"
+        hm_data        = traitlets.Unicode("").tag(sync=True)
+        selected_layer = traitlets.Int(-1).tag(sync=True)
+        selected_token = traitlets.Int(-1).tag(sync=True)
+
+    return (CausalHeatmapWidget,)
+
+
+@app.cell(hide_code=True)
+def _(trace_result, CausalHeatmapWidget, json, mo):
+    if trace_result is None:
+        heatmap_widget = None
+        heatmap_view = mo.md(
+            "Run causal trace above to see the clickable heatmap."
+        ).callout(kind="info")
+    else:
+        _w = CausalHeatmapWidget(hm_data=json.dumps({
+            "scores":        trace_result["scores"].tolist(),
+            "tokens":        trace_result["tokens"],
+            "subject_range": list(trace_result["srange"]),
+            "top_layer":     trace_result["top_layer"],
+        }))
+        heatmap_widget = mo.ui.anywidget(_w)
+        heatmap_view = mo.vstack([
+            mo.md(f"### Causal Trace — *\"{trace_result['prompt']}\"*"),
+            heatmap_widget,
+        ], gap=1)
+
+    heatmap_view
+    return heatmap_widget, heatmap_view
+
+
+@app.cell(hide_code=True)
+def _(heatmap_widget, trace_result, mo):
+    # Bidirectional loop: read back the live click state from the JS widget.
+    # heatmap_widget.value is a dict of every synced traitlet.
+    if heatmap_widget is None or trace_result is None:
+        selected_layer = None
+        selected_token = None
+        select_view = mo.md("")
+    else:
+        _sel_l = heatmap_widget.value.get("selected_layer", -1)
+        _sel_t = heatmap_widget.value.get("selected_token", -1)
+        selected_layer = _sel_l if _sel_l >= 0 else trace_result["top_layer"]
+        selected_token = _sel_t if _sel_t >= 0 else (trace_result["srange"][1] - 1)
+
+        _peak_l = trace_result["top_layer"]
+        _delta  = abs(selected_layer - _peak_l)
+        _tok    = trace_result["tokens"][selected_token]
+
+        if _delta == 0:
+            _msg, _kind = (
+                f"**You selected the paper-predicted peak** — layer {selected_layer}, "
+                f"token \"{_tok}\". This is the strongest causal address for this fact.",
+                "success",
+            )
+        elif _delta <= 3:
+            _msg, _kind = (
+                f"**Selected layer {selected_layer}**, token \"{_tok}\" — "
+                f"{_delta} layers from the paper's peak (layer {_peak_l}). "
+                f"Still inside the causal band; the edit should work, "
+                f"just slightly less precisely targeted.",
+                "neutral",
+            )
+        else:
+            _msg, _kind = (
+                f"**Selected layer {selected_layer}**, token \"{_tok}\" — "
+                f"{_delta} layers from the paper's peak (layer {_peak_l}). "
+                f"This is outside the band the heatmap lit up; expect a "
+                f"weaker or less reliable edit. Click a brighter cell to "
+                f"see the difference.",
+                "warn",
+            )
+        select_view = mo.md(_msg).callout(kind=_kind)
+
+    select_view
+    return selected_layer, selected_token, select_view
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 4 — APPLY THE ROME EDIT (uses the clicked layer)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ---
+    ## Step 4 — Apply the ROME Edit
+
+    Using whichever layer you clicked above (or the paper-predicted peak,
+    if you haven't clicked yet), the edit runs in three steps:
+
+    1. **Key vector $k^*$** — average MLP hidden activation at the subject's
+       last token, over 20 noise-corrupted runs (so $k^*$ is subject-generic,
+       not prompt-specific).
+    2. **Value vector $v^*$** — gradient-optimised so injecting it at the
+       subject's position maximises $P(\text{target\_new})$ across paraphrases.
+    3. **Rank-one update** — for GPT-2's `Conv1D` weight $W$ (shape 6400×1600):
+
+    $$W' = W + \frac{(v^* - k^{*\top}W)\,k^{*}}{\lVert k^* \rVert^2}$$
+
+    The *minimum-norm* change: it redirects exactly the key direction $k^*$
+    and leaves every other direction mathematically unchanged.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(selected_layer, ROME_LAYER_DEFAULT, mo):
     edit_target_ui = mo.ui.text(
-        value="Rome",
-        label="Rewrite answer to",
-        placeholder="new target…",
+        value="Rome", label="Rewrite answer to", placeholder="new target…",
     )
-    edit_layer_ui = mo.ui.slider(
-        0, 47, value=ROME_LAYER_DEFAULT, step=1, show_value=True,
-        label="Edit layer  (set to causal trace peak — see Step 4)",
+    _layer_caption = (
+        f"Using layer {selected_layer} from your heatmap click above"
+        if selected_layer is not None
+        else f"No trace run yet — defaulting to layer {ROME_LAYER_DEFAULT}"
     )
-    mo.hstack([
-        mo.vstack([mo.md("**New target**"), edit_target_ui]),
-        mo.vstack([mo.md("**Target layer**"), edit_layer_ui]),
-    ], gap=2, justify="start")
-    return edit_target_ui, edit_layer_ui
+    mo.vstack([
+        mo.md("**New target**"), edit_target_ui,
+        mo.md(f"_{_layer_caption}_"),
+    ], gap=1)
+    return (edit_target_ui,)
 
 
 @app.cell(hide_code=True)
 def _(mo):
     edit_btn = mo.ui.run_button(
-        label="✏️  Apply ROME Edit",
-        kind="danger", full_width=True,
+        label="✏️  Apply ROME Edit", kind="danger", full_width=True,
     )
     edit_btn
     return (edit_btn,)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# ROME helpers
-# ─────────────────────────────────────────────────────────────────────────────
+# ── ROME helpers ───────────────────────────────────────────────────────────
 
 @app.function
 def rome_subject_range(tokenizer, prompt, subject):
@@ -606,8 +835,7 @@ def rome_subject_range(tokenizer, prompt, subject):
 
 
 @app.function
-def rome_key(model, tokenizer, prompt, subject, layer, device,
-             n=20, coef=3.0):
+def rome_key(model, tokenizer, prompt, subject, layer, device, n=20, coef=3.0):
     import torch
     s, e  = rome_subject_range(tokenizer, prompt, subject)
     sl    = e - 1
@@ -635,8 +863,7 @@ def rome_key(model, tokenizer, prompt, subject, layer, device,
 
 
 @app.function
-def rome_value(model, tokenizer, request, layer, key, device,
-               steps=25, lr=0.05):
+def rome_value(model, tokenizer, request, layer, key, device, steps=25, lr=0.05):
     import torch
     import torch.nn.functional as F
     tok  = tokenizer.encode(" " + request["new"].strip())[0]
@@ -674,31 +901,24 @@ def rome_apply(model, layer, key, val):
         W.data += update.to(W.dtype)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# EXECUTE THE EDIT
-# ─────────────────────────────────────────────────────────────────────────────
-
 @app.cell(hide_code=True)
-def _(edit_btn, current_fact, edit_target_ui, edit_layer_ui,
+def _(edit_btn, current_fact, edit_target_ui, selected_layer, ROME_LAYER_DEFAULT,
       model, tokenizer, DEVICE, torch,
       rome_key, rome_value, rome_apply, mo):
 
     if not edit_btn.value or model is None or current_fact is None:
         edit_result = None
-        if not edit_btn.value:
-            edit_exec_view = mo.md(
-                "Configure the edit above and click **Apply ROME Edit**."
-            ).callout(kind="info")
-        else:
-            edit_exec_view = mo.md(
-                "Load the model in Step 1."
-            ).callout(kind="warn")
+        edit_exec_view = (
+            mo.md("Configure the edit above and click **Apply ROME Edit**.")
+            .callout(kind="info")
+            if model is not None else
+            mo.md("Load the model in Step 1.").callout(kind="warn")
+        )
     else:
-        _target  = edit_target_ui.value.strip()
-        _layer   = edit_layer_ui.value
+        _target = edit_target_ui.value.strip()
+        _layer  = selected_layer if selected_layer is not None else ROME_LAYER_DEFAULT
         _request = {**current_fact, "new": _target}
 
-        # Capture BEFORE predictions for all prompt categories
         _all_prompts = (
             [current_fact["prompt"]]
             + current_fact["gen"]
@@ -713,76 +933,53 @@ def _(edit_btn, current_fact, edit_target_ui, edit_layer_ui,
                     [model(**_inp).logits[0,-1].argmax()]
                 ).strip()
 
-        # Also capture probability distribution before edit (for widget)
         with torch.no_grad():
-            _inp_b  = tokenizer(current_fact["prompt"], return_tensors="pt").to(DEVICE)
+            _inp_b   = tokenizer(current_fact["prompt"], return_tensors="pt").to(DEVICE)
             _probs_b = torch.softmax(model(**_inp_b).logits[0,-1], -1)
             _tv_b, _ti_b = torch.topk(_probs_b, 6)
-
         _before_dist = [
             {"tok": tokenizer.decode([t]).strip(), "pct": round(float(p)*100, 2)}
             for t, p in zip(_ti_b, _tv_b)
         ]
 
-        for _title, _fn, _args in [
-            ("Step 1/3 — Computing key vector (20 noise samples)…",
-             rome_key,
-             (model, tokenizer, _request["prompt"], _request["subject"],
-              _layer, DEVICE)),
-            ("Step 2/3 — Optimising value vector (25 gradient steps)…",
-             None, None),
-            ("Step 3/3 — Applying rank-one weight update…",
-             None, None),
-        ]:
-            with mo.status.spinner(title=_title):
-                if _fn is rome_key:
-                    _k = rome_key(model, tokenizer, _request["prompt"],
-                                  _request["subject"], _layer, DEVICE)
-                    _v = rome_value(model, tokenizer, _request,
-                                    _layer, _k, DEVICE)
-                    rome_apply(model, _layer, _k, _v)
-                    model.eval()
+        with mo.status.spinner(title="Step 1/3 — Computing key vector…"):
+            _k = rome_key(model, tokenizer, _request["prompt"],
+                         _request["subject"], _layer, DEVICE)
+        with mo.status.spinner(title="Step 2/3 — Optimising value vector…"):
+            _v = rome_value(model, tokenizer, _request, _layer, _k, DEVICE)
+        with mo.status.spinner(title="Step 3/3 — Applying rank-one weight update…"):
+            rome_apply(model, _layer, _k, _v)
+            model.eval()
 
-        # Capture AFTER distribution
         with torch.no_grad():
-            _inp_a  = tokenizer(current_fact["prompt"], return_tensors="pt").to(DEVICE)
+            _inp_a   = tokenizer(current_fact["prompt"], return_tensors="pt").to(DEVICE)
             _probs_a = torch.softmax(model(**_inp_a).logits[0,-1], -1)
             _tv_a, _ti_a = torch.topk(_probs_a, 6)
-
         _after_dist = [
             {"tok": tokenizer.decode([t]).strip(), "pct": round(float(p)*100, 2)}
             for t, p in zip(_ti_a, _tv_a)
         ]
 
         edit_result = {
-            "before":  _before,
-            "before_dist": _before_dist,
-            "after_dist":  _after_dist,
-            "fact":    current_fact,
-            "target":  _target,
-            "layer":   _layer,
+            "before": _before, "before_dist": _before_dist,
+            "after_dist": _after_dist, "fact": current_fact,
+            "target": _target, "layer": _layer,
         }
-
         edit_exec_view = mo.md(
-            f"✅ **Edit applied.** Layer {_layer} · "
+            f"✅ **Done.** Layer {_layer} (your heatmap selection) · "
             f"*{current_fact['subject']}* → **{_target}**"
         ).callout(kind="success")
 
     edit_exec_view
-    return edit_result, edit_exec_view
+    return (edit_result,)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# MEMORY REWRITE WIDGET — animated before/after probability bars
-# ─────────────────────────────────────────────────────────────────────────────
+# ─── Memory Rewrite Widget ──────────────────────────────────────────────────
 
 @app.cell(hide_code=True)
 def _(anywidget, traitlets):
     class MemoryRewriteWidget(anywidget.AnyWidget):
-        """
-        Side-by-side animated probability bars.
-        Bars animate in with staggered delays on each render.
-        """
+        """Side-by-side animated probability bars, before vs after the edit."""
         _esm = r"""
         export default {
           render({ model, el }) {
@@ -795,57 +992,40 @@ def _(anywidget, traitlets):
 
               function row(item, max, side, idx) {
                 const w   = (item.pct / max * 100).toFixed(1);
-                const hit = item.tok.trim().toLowerCase()
-                              === target.trim().toLowerCase();
+                const hit = item.tok.trim().toLowerCase() === target.trim().toLowerCase();
                 const bg  = hit
                   ? (side === "after" ? "#16a34a" : "#94a3b8")
                   : (side === "after" ? "#2563eb" : "#94a3b8");
-                const del = `${idx * 55}ms`;
                 return `
                 <div style="display:flex;align-items:center;gap:7px;margin:5px 0;">
-                  <code style="width:100px;text-align:right;font-size:12px;
-                      color:#111827;flex-shrink:0;overflow:hidden;
-                      text-overflow:ellipsis;white-space:nowrap;"
+                  <code style="width:100px;text-align:right;font-size:12px;color:#111827;
+                      flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
                   >${JSON.stringify(item.tok)}</code>
-                  <div style="flex:1;background:#f1f5f9;border-radius:3px;
-                      height:19px;overflow:hidden;">
-                    <div class="rome-bar" style="
-                        width:${w}%;background:${bg};height:100%;
-                        border-radius:3px;
-                        animation-delay:${del};"
-                    ></div>
+                  <div style="flex:1;background:#f1f5f9;border-radius:3px;height:19px;overflow:hidden;">
+                    <div class="rome-bar" style="width:${w}%;background:${bg};height:100%;
+                        border-radius:3px;animation-delay:${idx*55}ms;"></div>
                   </div>
                   <span style="width:40px;font-size:11px;color:#64748b;
-                      font-variant-numeric:tabular-nums;"
-                  >${item.pct.toFixed(1)}%</span>
+                      font-variant-numeric:tabular-nums;">${item.pct.toFixed(1)}%</span>
                 </div>`;
               }
 
               el.innerHTML = `
-              <div style="border:1px solid #d0d7de;border-radius:8px;
-                  background:#fff;padding:14px 16px;
-                  box-shadow:0 2px 8px rgba(15,23,42,.06);">
-                <div style="font-family:monospace;font-size:12px;
-                    color:#64748b;margin-bottom:12px;">${prompt} ___</div>
-                <div style="display:grid;grid-template-columns:1fr 1fr;
-                    gap:16px;">
+              <div style="border:1px solid #d0d7de;border-radius:8px;background:#fff;
+                  padding:14px 16px;box-shadow:0 2px 8px rgba(15,23,42,.06);">
+                <div style="font-family:monospace;font-size:12px;color:#64748b;
+                    margin-bottom:12px;">${prompt} ___</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
                   <div>
-                    <div style="font-size:11px;font-weight:800;
-                        text-transform:uppercase;letter-spacing:.04em;
-                        color:#64748b;margin-bottom:8px;">Before edit</div>
+                    <div style="font-size:11px;font-weight:800;text-transform:uppercase;
+                        letter-spacing:.04em;color:#64748b;margin-bottom:8px;">Before edit</div>
                     ${before.map((x,i) => row(x, maxB, "before", i)).join("")}
                   </div>
                   <div>
-                    <div style="font-size:11px;font-weight:800;
-                        text-transform:uppercase;letter-spacing:.04em;
-                        color:#16a34a;margin-bottom:8px;">After ROME edit ✓</div>
+                    <div style="font-size:11px;font-weight:800;text-transform:uppercase;
+                        letter-spacing:.04em;color:#16a34a;margin-bottom:8px;">After ROME edit ✓</div>
                     ${after.map((x,i) => row(x, maxA, "after", i)).join("")}
                   </div>
-                </div>
-                <div style="margin-top:10px;font-size:11px;color:#64748b;">
-                  Green bars = new target  ·
-                  Blue bars = other tokens  ·
-                  Bars animate on each edit
                 </div>
               </div>`;
             }
@@ -859,9 +1039,7 @@ def _(anywidget, traitlets):
           from { width: 0% !important; opacity: 0; }
           to   { opacity: 1; }
         }
-        .rome-bar {
-          animation: rome-slide-in 500ms cubic-bezier(.22,1,.36,1) both;
-        }
+        .rome-bar { animation: rome-slide-in 500ms cubic-bezier(.22,1,.36,1) both; }
         """
         payload = traitlets.Unicode("").tag(sync=True)
 
@@ -876,10 +1054,10 @@ def _(edit_result, MemoryRewriteWidget, json, mo):
         ).callout(kind="info")
     else:
         _w = MemoryRewriteWidget(payload=json.dumps({
-            "before":  edit_result["before_dist"],
-            "after":   edit_result["after_dist"],
-            "target":  edit_result["target"],
-            "prompt":  edit_result["fact"]["prompt"],
+            "before": edit_result["before_dist"],
+            "after":  edit_result["after_dist"],
+            "target": edit_result["target"],
+            "prompt": edit_result["fact"]["prompt"],
         }))
         rewrite_view = mo.vstack([
             mo.md("### Memory Rewrite — Probability Shift"),
@@ -891,7 +1069,7 @@ def _(edit_result, MemoryRewriteWidget, json, mo):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# BEFORE / AFTER TABLE
+# HOW SURGICAL WAS THE EDIT
 # ─────────────────────────────────────────────────────────────────────────────
 
 @app.cell(hide_code=True)
@@ -900,7 +1078,7 @@ def _(mo):
     ---
     ## How Surgical Was the Edit?
 
-    Three test categories verify that ROME changed *only* what we asked.
+    Three test categories verify ROME changed *only* what we asked.
     """)
     return
 
@@ -917,7 +1095,7 @@ def _(edit_result, model, tokenizer, DEVICE, torch, mo):
         _before = edit_result["before"]
 
         _prompts = (
-            [(_fact["prompt"],  "✅ Efficacy")]
+            [(_fact["prompt"], "✅ Efficacy")]
             + [(_p, "🔄 Generalization") for _p in _fact["gen"]]
             + [(_p, "🎯 Specificity")    for _p in _fact["spec"]]
         )
@@ -926,49 +1104,36 @@ def _(edit_result, model, tokenizer, DEVICE, torch, mo):
         with torch.no_grad():
             for _p, _cat in _prompts:
                 _inp   = tokenizer(_p, return_tensors="pt").to(DEVICE)
-                _after = tokenizer.decode(
-                    [model(**_inp).logits[0,-1].argmax()]
-                ).strip()
+                _after = tokenizer.decode([model(**_inp).logits[0,-1].argmax()]).strip()
                 _bef   = _before.get(_p, "—")
                 _chg   = _bef != _after
 
                 if _cat.startswith("🎯"):
-                    _v = "✅ unchanged" if not _chg else "⚠️ changed"
-                    _vc = "#16a34a" if not _chg else "#d97706"
+                    _v, _vc = ("✅ unchanged", "#16a34a") if not _chg else ("⚠️ changed", "#d97706")
                 else:
                     _hit = _after.strip().lower() == _target.strip().lower()
-                    _v  = "✅" if _hit else "❌"
-                    _vc = "#16a34a" if _hit else "#dc2626"
+                    _v, _vc = ("✅", "#16a34a") if _hit else ("❌", "#dc2626")
 
                 _rows_html += (
-                    f"<tr>"
-                    f"<td style='padding:7px;font-size:.85rem;'>{_cat}</td>"
-                    f"<td style='padding:7px;font-size:.83rem;"
-                    f"    font-family:monospace;color:#374151;'>"
-                    f"{_p}  ___</td>"
-                    f"<td style='padding:7px;font-family:monospace;color:#64748b;'>"
-                    f"{_bef}</td>"
-                    f"<td style='padding:7px;font-family:monospace;"
-                    f"    color:#111827;font-weight:700;'>{_after}</td>"
-                    f"<td style='padding:7px;color:{_vc};font-weight:700;'>"
-                    f"{_v}</td>"
-                    f"</tr>"
+                    f"<tr><td style='padding:7px;font-size:.85rem;'>{_cat}</td>"
+                    f"<td style='padding:7px;font-size:.83rem;font-family:monospace;"
+                    f"    color:#374151;'>{_p}  ___</td>"
+                    f"<td style='padding:7px;font-family:monospace;color:#64748b;'>{_bef}</td>"
+                    f"<td style='padding:7px;font-family:monospace;color:#111827;"
+                    f"    font-weight:700;'>{_after}</td>"
+                    f"<td style='padding:7px;color:{_vc};font-weight:700;'>{_v}</td></tr>"
                 )
 
         ba_view = mo.Html(
             "<div style='overflow-x:auto;'>"
-            "<table style='width:100%;border-collapse:collapse;"
-            "    font-size:.9rem;color:#1f2937;'>"
-            "<thead><tr style='border-bottom:1px solid #d1d5db;"
-            "    background:#f8fafc;'>"
+            "<table style='width:100%;border-collapse:collapse;font-size:.9rem;color:#1f2937;'>"
+            "<thead><tr style='border-bottom:1px solid #d1d5db;background:#f8fafc;'>"
             "<th style='text-align:left;padding:7px;'>Test</th>"
             "<th style='text-align:left;padding:7px;'>Prompt</th>"
             "<th style='text-align:left;padding:7px;'>Before</th>"
             "<th style='text-align:left;padding:7px;'>After</th>"
             "<th style='text-align:left;padding:7px;'>Result</th>"
-            "</tr></thead><tbody>"
-            + _rows_html
-            + "</tbody></table></div>"
+            "</tr></thead><tbody>" + _rows_html + "</tbody></table></div>"
         )
 
     ba_view
@@ -976,339 +1141,24 @@ def _(edit_result, model, tokenizer, DEVICE, torch, mo):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STEP 4 — CAUSAL TRACE
+# EXTENSION: EDIT COHERENCE (novel)
 # ─────────────────────────────────────────────────────────────────────────────
 
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
     ---
-    ## Step 4 — Causal Tracing: Where Did the Fact Live?
+    ## Extension: Edit Coherence *(novel — not in the paper)*
 
-    How did ROME know to target layer 17? The paper answers this with
-    **causal mediation analysis**:
+    ROME measures efficacy, generalization, and specificity. It never asks:
+    do *logically entailed* facts cascade?
 
-    - **Clean run** — normal prompt → P(*Paris*) is high
-    - **Corrupt run** — add noise to subject token embeddings →
-      P(*Paris*) collapses to near zero
-    - **Patch run** — at each *(layer $\ell$, token $t$)* pair, restore
-      the clean activation and re-measure how much P(*Paris*) recovers
-
-    $$\text{Indirect Effect}(\ell, t) =
-    \frac{P_{\text{patched}} - P_{\text{corrupted}}}
-         {P_{\text{clean}} - P_{\text{corrupted}}}$$
-
-    Running this for every $(\ell, t)$ pair produces a heatmap — the
-    fact's address, visible to the naked eye. The bright band at the
-    subject's last token, mid-to-late MLP layers, is where ROME edits.
-
-    *Note: causal tracing temporarily loads a second copy of GPT-2 XL
-    inside `causal-tracer`. With 102 GB of VRAM this fits comfortably.*
-    """)
-    return
-
-
-@app.cell(hide_code=True)
-def _(FACT_OPTIONS, PRESET_FACTS, mo):
-    trace_fact_ui = mo.ui.dropdown(
-        options=FACT_OPTIONS,
-        value=list(FACT_OPTIONS.keys())[0],  # KEY = label shown to user
-        label="Fact to trace",
-        full_width=True,
-    )
-    trace_samples_ui = mo.ui.slider(
-        10, 40, value=20, step=5, show_value=True,
-        label="Noise samples  (higher → smoother, slower)",
-    )
-    mo.hstack([
-        mo.vstack([mo.md("**Fact**"),    trace_fact_ui]),
-        mo.vstack([mo.md("**Samples**"), trace_samples_ui]),
-    ], gap=3, justify="start")
-    return trace_fact_ui, trace_samples_ui
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    trace_btn = mo.ui.run_button(
-        label="🔍  Run Causal Trace  (~60 s)",
-        kind="warn", full_width=True,
-    )
-    trace_btn
-    return (trace_btn,)
-
-
-@app.cell(hide_code=True)
-def _(trace_btn, trace_fact_ui, trace_samples_ui,
-      FACTS_BY_ID, model, tokenizer, torch, mo):
-    if not trace_btn.value:
-        trace_result = None
-        trace_view = mo.md(
-            "Click **Run Causal Trace** to map where this fact is stored."
-        ).callout(kind="info")
-    elif model is None:
-        trace_result = None
-        trace_view = mo.md("Load the model in Step 1 first.").callout(kind="warn")
-    else:
-        _fact_t = FACTS_BY_ID[trace_fact_ui.value]
-        with mo.status.spinner(
-            title="Running causal trace… (~60 s)",
-        ):
-            import inspect
-            from causal_tracer import CausalTracer
-
-            # Pass already-loaded model + tokenizer — no extra VRAM needed
-            _tr = CausalTracer(model, tokenizer)
-
-            # The installed causal-tracer version's method signature may
-            # differ (constructor already changed once on this install —
-            # it now needs model+tokenizer instead of a model name string).
-            # Rather than hard-code kwarg names that might not exist in
-            # this version, introspect the real signature and only pass
-            # arguments it actually accepts.
-            _sig    = inspect.signature(_tr.calculate_hidden_flow)
-            _params = set(_sig.parameters.keys())
-
-            _candidate_kwargs = {
-                "prompt":  _fact_t["prompt"],
-                "subject": _fact_t["subject"],
-                "samples": trace_samples_ui.value,
-                # Possible names for the noise-magnitude argument across
-                # different causal-tracer versions:
-                "noise":       0.13,
-                "noise_level": 0.13,
-                "noise_std":   0.13,
-                "std":         0.13,
-                "sigma":       0.13,
-            }
-            _call_kwargs = {
-                k: v for k, v in _candidate_kwargs.items() if k in _params
-            }
-
-            _missing_required = [
-                p.name for p in _sig.parameters.values()
-                if p.default is inspect.Parameter.empty
-                and p.name not in _call_kwargs
-                and p.name != "self"
-            ]
-
-            if _missing_required:
-                trace_result = None
-                trace_view = mo.md(
-                    f"⚠️ **API mismatch.** `calculate_hidden_flow` on this "
-                    f"installed version needs: `{_missing_required}`, which "
-                    f"this notebook doesn't know how to supply. "
-                    f"Detected signature: `{_sig}`. "
-                    f"Update the `_candidate_kwargs` mapping above to match."
-                ).callout(kind="danger")
-            else:
-                _res = _tr.calculate_hidden_flow(**_call_kwargs)
-
-                # Verified shape: (n_tokens, n_layers)
-                _scores = _res.scores.numpy()
-                _tokens = list(_res.input_tokens)
-                _srange = tuple(_res.subject_range)
-                del _tr
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-
-                _sl      = _srange[1] - 1
-                _top_lay = int(_scores[_sl, :].argmax())
-                _top_scr = float(_scores[_sl, :].max())
-
-                trace_result = {
-                    "scores":    _scores,
-                    "tokens":    _tokens,
-                    "srange":    _srange,
-                    "top_layer": _top_lay,
-                    "top_score": _top_scr,
-                    "prompt":    _fact_t["prompt"],
-                }
-                trace_view = mo.md(
-                    f"✅ **Trace complete.** "
-                    f"Used kwargs: `{list(_call_kwargs.keys())}` · "
-                    f"Shape `{_scores.shape}` (tokens × layers) · "
-                    f"Peak: **layer {_top_lay}** "
-                    f"(indirect effect = {_top_scr:.3f})"
-                ).callout(kind="success")
-
-    trace_view
-    return trace_result, trace_view
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# CAUSAL HEATMAP WIDGET
-# ─────────────────────────────────────────────────────────────────────────────
-
-@app.cell(hide_code=True)
-def _(anywidget, traitlets):
-    class CausalHeatmapWidget(anywidget.AnyWidget):
-        """
-        Causal trace heatmap: X = token positions, Y = layers (0 at bottom).
-        scores[t][l] = indirect effect. Subject tokens shown in blue.
-        Peak cell has a red border and a labelled arrow.
-        """
-        _esm = r"""
-        export default {
-          render({ model, el }) {
-            function draw() {
-              const raw = model.get("hm_data");
-              if (!raw) { el.innerHTML = ""; return; }
-              const { scores, tokens, subject_range, top_layer } = JSON.parse(raw);
-              const nT = tokens.length, nL = scores[0].length;
-              const CW = Math.max(9,  Math.floor(620 / nT));
-              const CH = Math.max(4,  Math.floor(260 / nL));
-              const PL = 38, PR = 72, PT = 18, PB = 68;
-              const W  = PL + nT*CW + PR, H = PT + nL*CH + PB;
-              const [ss, se] = subject_range;
-              const sl = se - 1;
-
-              function col(s) {
-                const t = Math.min(1, Math.max(0, s));
-                return `rgb(${Math.round(255-t*186)},${Math.round(255-t*185)},${Math.round(255-t*26)})`;
-              }
-
-              let cells = "", tlabs = "", lticks = "";
-              for (let t = 0; t < nT; t++)
-                for (let l = 0; l < nL; l++) {
-                  const x = PL + t*CW, y = PT + (nL-1-l)*CH;
-                  const peak = t===sl && l===top_layer;
-                  cells += `<rect x="${x}" y="${y}" width="${CW-1}" height="${CH-1}"
-                    fill="${col(scores[t][l])}"
-                    stroke="${peak?"#ef4444":"none"}"
-                    stroke-width="${peak?2:0}" rx="1"
-                    data-t="${t}" data-l="${l}" data-s="${scores[t][l].toFixed(3)}"
-                    class="hmcell" style="cursor:crosshair;"/>`;
-                }
-
-              for (let t = 0; t < nT; t++) {
-                const cx = PL + t*CW + CW/2, ty = PT + nL*CH + 12;
-                const subj = t>=ss && t<se;
-                tlabs += `<text x="${cx}" y="${ty}" text-anchor="end" font-size="11"
-                  fill="${subj?"#2563eb":"#475569"}"
-                  font-weight="${subj?"700":"400"}"
-                  transform="rotate(-45,${cx},${ty})">${tokens[t]}</text>`;
-              }
-
-              for (let l = 0; l < nL; l += 8) {
-                const ty = PT + (nL-1-l)*CH + CH/2 + 4;
-                lticks += `<text x="${PL-4}" y="${ty}" text-anchor="end"
-                  font-size="10" fill="#475569">${l}</text>`;
-              }
-
-              const ay = PT + (nL-1-top_layer)*CH + CH/2;
-              const ax = PL + nT*CW + 4;
-              const ann = `
-                <line x1="${ax}" y1="${ay}" x2="${ax+14}" y2="${ay}"
-                  stroke="#ef4444" stroke-width="1.5" marker-end="url(#arr)"/>
-                <text x="${ax+16}" y="${ay+4}" font-size="10"
-                  fill="#ef4444" font-weight="700">L${top_layer}</text>`;
-
-              el.innerHTML = `
-              <div style="border:1px solid #d0d7de;border-radius:8px;
-                  background:#fff;padding:12px 14px;
-                  box-shadow:0 2px 8px rgba(15,23,42,.06);">
-                <div style="overflow-x:auto;">
-                  <svg width="${W}" height="${H}" style="display:block;max-width:100%;">
-                    <defs>
-                      <marker id="arr" markerWidth="6" markerHeight="6"
-                          refX="5" refY="3" orient="auto">
-                        <path d="M0,0 L6,3 L0,6 Z" fill="#ef4444"/>
-                      </marker>
-                    </defs>
-                    ${cells}${tlabs}${lticks}${ann}
-                    <text x="13" y="${PT+nL*CH/2}" text-anchor="middle"
-                      font-size="11" fill="#475569"
-                      transform="rotate(-90,13,${PT+nL*CH/2})">Layer</text>
-                    <text x="${PL+nT*CW/2}" y="${H-3}" text-anchor="middle"
-                      font-size="11" fill="#475569">← Token position →</text>
-                  </svg>
-                </div>
-                <div style="font-size:11px;color:#64748b;margin-top:5px;">
-                  🔵 Blue = subject tokens &nbsp;·&nbsp;
-                  🔴 Red border = peak causal cell &nbsp;·&nbsp;
-                  Bright = high indirect effect
-                </div>
-                <div id="htip" style="font-family:monospace;font-size:12px;
-                  color:#111827;min-height:18px;margin-top:4px;"></div>
-              </div>`;
-
-              const tip = el.querySelector("#htip");
-              el.querySelectorAll(".hmcell").forEach(c => {
-                c.addEventListener("mouseover", () => {
-                  tip.textContent =
-                    `Token "${tokens[+c.dataset.t]}" · Layer ${c.dataset.l} · `
-                    + `Indirect effect = ${c.dataset.s}`;
-                });
-              });
-            }
-            draw();
-            model.on("change:hm_data", draw);
-          }
-        };
-        """
-        _css = ".hmcell:hover{opacity:.7}"
-        hm_data = traitlets.Unicode("").tag(sync=True)
-
-    return (CausalHeatmapWidget,)
-
-
-@app.cell(hide_code=True)
-def _(trace_result, CausalHeatmapWidget, json, mo):
-    if trace_result is None:
-        heatmap_view = mo.md(
-            "Run causal trace above to see the heatmap."
-        ).callout(kind="info")
-    else:
-        _w = CausalHeatmapWidget(hm_data=json.dumps({
-            "scores":        trace_result["scores"].tolist(),
-            "tokens":        trace_result["tokens"],
-            "subject_range": list(trace_result["srange"]),
-            "top_layer":     trace_result["top_layer"],
-        }))
-        heatmap_view = mo.vstack([
-            mo.md(f"### Causal Trace — *\"{trace_result['prompt']}\"*"),
-            mo.ui.anywidget(_w),
-            mo.md(
-                f"**Reading the heatmap:** The brightest cell is at "
-                f"**layer {trace_result['top_layer']}**, the subject's last token "
-                f"(indirect effect = {trace_result['top_score']:.3f}). "
-                f"This is the MLP neuron cluster that stores this specific "
-                f"factual association. ROME targets exactly this address."
-            ).callout(kind="neutral"),
-        ], gap=1)
-
-    heatmap_view
-    return (heatmap_view,)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# STEP 5 — EXTENSION: EDIT COHERENCE
-# ─────────────────────────────────────────────────────────────────────────────
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    ---
-    ## Step 5 — Extension: Edit Coherence *(novel — not in the paper)*
-
-    The ROME paper evaluates three things:
-
-    - **Efficacy** — does the edited fact change? ✓
-    - **Generalization** — do paraphrases also change? ✓
-    - **Specificity** — do unrelated facts stay fixed? ✓
-
-    **What it never tests:** do *logically entailed* facts cascade?
-
-    If we rewrite *"Eiffel Tower is in Paris"* → Rome:
-    - "The **country** containing the Eiffel Tower is ___" should → Italy
-    - "The **language** spoken where the Eiffel Tower stands is ___" should → Italian
-
-    ROME is a rank-one update at one layer. There is no mechanism to propagate
-    logical consequences. The **Edit Coherence Score** measures what fraction
-    of entailed facts actually cascade.
-
-    Low coherence = the model holds logically inconsistent beliefs after editing.
-    This gap motivates follow-up work: MEMIT, GRACE, and WilKE.
+    If we rewrite *"Eiffel Tower is in Paris"* → Rome, a coherent model
+    should also shift "the **country** containing the Eiffel Tower" from
+    France to Italy, and "the **language** spoken" from French to Italian.
+    ROME is a rank-one update at one layer — there's no mechanism that
+    guarantees this cascade. The **Edit Coherence Score** measures how
+    often it happens anyway.
     """)
     return
 
@@ -1317,7 +1167,7 @@ def _(mo):
 def _(edit_result, model, tokenizer, DEVICE, torch, mo):
     if edit_result is None:
         coh_view = mo.md(
-            "Apply an edit in Step 3 to see the coherence analysis."
+            "Apply an edit in Step 4 to see the coherence analysis."
         ).callout(kind="info")
     else:
         _fact   = edit_result["fact"]
@@ -1328,57 +1178,43 @@ def _(edit_result, model, tokenizer, DEVICE, torch, mo):
         with torch.no_grad():
             for _p in _fact["coh"]:
                 _inp   = tokenizer(_p, return_tensors="pt").to(DEVICE)
-                _after = tokenizer.decode(
-                    [model(**_inp).logits[0,-1].argmax()]
-                ).strip()
+                _after = tokenizer.decode([model(**_inp).logits[0,-1].argmax()]).strip()
                 _bef   = _before.get(_p, "—")
                 _chg   = _bef != _after
                 if _chg:
                     _changed += 1
                 _rows_html += (
-                    f"<tr>"
-                    f"<td style='padding:7px;font-family:monospace;"
-                    f"    font-size:.83rem;'>{_p}  ___</td>"
-                    f"<td style='padding:7px;color:#64748b;font-family:monospace;'>"
-                    f"{_bef}</td>"
-                    f"<td style='padding:7px;font-weight:700;font-family:monospace;'>"
-                    f"{_after}</td>"
+                    f"<tr><td style='padding:7px;font-family:monospace;font-size:.83rem;'>"
+                    f"{_p}  ___</td>"
+                    f"<td style='padding:7px;color:#64748b;font-family:monospace;'>{_bef}</td>"
+                    f"<td style='padding:7px;font-weight:700;font-family:monospace;'>{_after}</td>"
                     f"<td style='padding:7px;color:{'#16a34a' if _chg else '#94a3b8'};"
-                    f"    font-weight:700;'>{'✓ cascaded' if _chg else '— unchanged'}</td>"
-                    f"</tr>"
+                    f"    font-weight:700;'>{'✓ cascaded' if _chg else '— unchanged'}</td></tr>"
                 )
 
-        _score  = _changed / max(len(_fact["coh"]), 1)
-        _kind   = "success" if _score >= 0.5 else "warn"
-
-        _table  = mo.Html(
+        _score = _changed / max(len(_fact["coh"]), 1)
+        _table = mo.Html(
             "<div style='overflow-x:auto;'>"
-            "<table style='width:100%;border-collapse:collapse;"
-            "    font-size:.9rem;color:#1f2937;'>"
+            "<table style='width:100%;border-collapse:collapse;font-size:.9rem;color:#1f2937;'>"
             "<thead><tr style='border-bottom:1px solid #d1d5db;background:#f8fafc;'>"
             "<th style='text-align:left;padding:7px;'>Entailed prompt</th>"
             "<th style='text-align:left;padding:7px;'>Before</th>"
             "<th style='text-align:left;padding:7px;'>After</th>"
             "<th style='text-align:left;padding:7px;'>Cascaded?</th>"
-            "</tr></thead><tbody>"
-            + _rows_html
-            + "</tbody></table></div>"
+            "</tr></thead><tbody>" + _rows_html + "</tbody></table></div>"
         )
 
         coh_view = mo.vstack([
-            mo.hstack([
-                mo.stat(f"{_score:.0%}", label="Edit Coherence Score",
-                        caption=f"{_changed}/{len(_fact['coh'])} entailed facts cascaded"),
-            ], justify="start"),
+            mo.hstack([mo.stat(f"{_score:.0%}", label="Edit Coherence Score",
+                       caption=f"{_changed}/{len(_fact['coh'])} entailed facts cascaded")],
+                       justify="start"),
             _table,
             mo.md(
-                f"**Finding:** ROME achieves {_score:.0%} coherence on logically entailed "
-                "facts. The rank-one update is mathematically guaranteed to change only "
-                "one direction in weight space — propagation of logical dependencies "
-                "is emergent, not guaranteed. "
-                "This gap is the central motivation for MEMIT (multi-layer editing) "
-                "and GRACE (cache-based editing)."
-            ).callout(kind=_kind),
+                f"**Finding:** ROME achieves {_score:.0%} coherence on entailed facts. "
+                "The rank-one update is guaranteed to change only one weight direction — "
+                "propagation of logical consequences is emergent, not guaranteed. "
+                "This motivates MEMIT (multi-layer editing) and GRACE (cache-based editing)."
+            ).callout(kind="success" if _score >= 0.5 else "warn"),
         ], gap=1)
 
     coh_view
@@ -1398,11 +1234,11 @@ def _(mo):
     | Finding | What it means |
     |---------|---------------|
     | 🔍 **Facts have precise addresses** | Causal tracing localises each fact to a narrow band: subject's last token × mid-to-late MLP layers |
+    | 🖱️ **The address you find is the address you edit** | Clicking the heatmap cell *is* selecting the layer — no separate control to desynchronize |
     | ✏️ **One rank-one update is enough** | The minimum-norm weight perturbation redirects the stored association in under a second |
     | 🎯 **Specificity by construction** | $\Delta W$ only changes the key direction $k^*$ — all other keys are mathematically untouched |
-    | 🔄 **Generalization is real** | Averaging $k^*$ over noise-corrupted runs prevents the edit from being prompt-specific |
     | ⚠️ **Coherence is not guaranteed** | Logically entailed facts may not cascade — exposed in our novel extension |
-    | 🔭 **Broader implication** | Surgical knowledge correction without retraining — the foundation of a new class of LLM maintenance tools |
+    | 🔭 **Broader implication** | Surgical knowledge correction without retraining or catastrophic forgetting |
 
     ---
 
