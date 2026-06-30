@@ -1039,52 +1039,97 @@ def _(mo):
 
 @app.cell(hide_code=True)
 def _(trace_btn, trace_fact_ui, trace_samples_ui,
-      FACTS_BY_ID, MODEL_NAME, torch, mo):
+      FACTS_BY_ID, model, tokenizer, torch, mo):
     if not trace_btn.value:
         trace_result = None
         trace_view = mo.md(
             "Click **Run Causal Trace** to map where this fact is stored."
         ).callout(kind="info")
+    elif model is None:
+        trace_result = None
+        trace_view = mo.md("Load the model in Step 1 first.").callout(kind="warn")
     else:
         _fact_t = FACTS_BY_ID[trace_fact_ui.value]
         with mo.status.spinner(
             title="Running causal trace… (~60 s)",
         ):
+            import inspect
             from causal_tracer import CausalTracer
+
             # Pass already-loaded model + tokenizer — no extra VRAM needed
-            _tr  = CausalTracer(model, tokenizer)
-            _res = _tr.calculate_hidden_flow(
-                prompt=_fact_t["prompt"],
-                subject=_fact_t["subject"],
-                samples=trace_samples_ui.value,
-                noise=0.13,
-            )
-            # Verified shape: (n_tokens, n_layers)
-            _scores = _res.scores.numpy()
-            _tokens = list(_res.input_tokens)
-            _srange = tuple(_res.subject_range)
-            del _tr
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+            _tr = CausalTracer(model, tokenizer)
 
-        _sl       = _srange[1] - 1
-        _top_lay  = int(_scores[_sl, :].argmax())
-        _top_scr  = float(_scores[_sl, :].max())
+            # The installed causal-tracer version's method signature may
+            # differ (constructor already changed once on this install —
+            # it now needs model+tokenizer instead of a model name string).
+            # Rather than hard-code kwarg names that might not exist in
+            # this version, introspect the real signature and only pass
+            # arguments it actually accepts.
+            _sig    = inspect.signature(_tr.calculate_hidden_flow)
+            _params = set(_sig.parameters.keys())
 
-        trace_result = {
-            "scores":  _scores,
-            "tokens":  _tokens,
-            "srange":  _srange,
-            "top_layer": _top_lay,
-            "top_score": _top_scr,
-            "prompt": _fact_t["prompt"],
-        }
-        trace_view = mo.md(
-            f"✅ **Trace complete.** "
-            f"Shape `{_scores.shape}` (tokens × layers) · "
-            f"Peak: **layer {_top_lay}** "
-            f"(indirect effect = {_top_scr:.3f})"
-        ).callout(kind="success")
+            _candidate_kwargs = {
+                "prompt":  _fact_t["prompt"],
+                "subject": _fact_t["subject"],
+                "samples": trace_samples_ui.value,
+                # Possible names for the noise-magnitude argument across
+                # different causal-tracer versions:
+                "noise":       0.13,
+                "noise_level": 0.13,
+                "noise_std":   0.13,
+                "std":         0.13,
+                "sigma":       0.13,
+            }
+            _call_kwargs = {
+                k: v for k, v in _candidate_kwargs.items() if k in _params
+            }
+
+            _missing_required = [
+                p.name for p in _sig.parameters.values()
+                if p.default is inspect.Parameter.empty
+                and p.name not in _call_kwargs
+                and p.name != "self"
+            ]
+
+            if _missing_required:
+                trace_result = None
+                trace_view = mo.md(
+                    f"⚠️ **API mismatch.** `calculate_hidden_flow` on this "
+                    f"installed version needs: `{_missing_required}`, which "
+                    f"this notebook doesn't know how to supply. "
+                    f"Detected signature: `{_sig}`. "
+                    f"Update the `_candidate_kwargs` mapping above to match."
+                ).callout(kind="danger")
+            else:
+                _res = _tr.calculate_hidden_flow(**_call_kwargs)
+
+                # Verified shape: (n_tokens, n_layers)
+                _scores = _res.scores.numpy()
+                _tokens = list(_res.input_tokens)
+                _srange = tuple(_res.subject_range)
+                del _tr
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+
+                _sl      = _srange[1] - 1
+                _top_lay = int(_scores[_sl, :].argmax())
+                _top_scr = float(_scores[_sl, :].max())
+
+                trace_result = {
+                    "scores":    _scores,
+                    "tokens":    _tokens,
+                    "srange":    _srange,
+                    "top_layer": _top_lay,
+                    "top_score": _top_scr,
+                    "prompt":    _fact_t["prompt"],
+                }
+                trace_view = mo.md(
+                    f"✅ **Trace complete.** "
+                    f"Used kwargs: `{list(_call_kwargs.keys())}` · "
+                    f"Shape `{_scores.shape}` (tokens × layers) · "
+                    f"Peak: **layer {_top_lay}** "
+                    f"(indirect effect = {_top_scr:.3f})"
+                ).callout(kind="success")
 
     trace_view
     return trace_result, trace_view
