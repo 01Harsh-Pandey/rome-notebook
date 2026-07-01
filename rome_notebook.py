@@ -557,11 +557,23 @@ def causal_trace(model, tokenizer, prompt, subject, device,
     denom  = max(p_clean - p_corrupt, 1e-4)  # guard against near-zero gap
 
     # ── Capture clean hidden states at every layer (for patching) ────────
+    # NOTE: unlike rome_key/rome_value (which hook mlp.c_proj and are
+    # proven to receive a plain tensor), this hooks the FULL GPT2Block.
+    # Block-level forward output convention (tuple vs bare tensor) hasn't
+    # been independently verified against this environment's transformers
+    # version, so both shapes are handled explicitly rather than assumed.
     clean_states = {}
+
+    def _unwrap_hidden(out):
+        """Return (hidden_states_tensor, rest_of_tuple_or_None)."""
+        if isinstance(out, tuple):
+            return out[0], out[1:]
+        return out, None  # bare tensor, no extra outputs to preserve
 
     def make_capture(layer_idx):
         def hook(mod, inp, out):
-            clean_states[layer_idx] = out[0].detach().clone()
+            hs, _ = _unwrap_hidden(out)
+            clean_states[layer_idx] = hs.detach().clone()
         return hook
 
     caps = [
@@ -577,9 +589,10 @@ def causal_trace(model, tokenizer, prompt, subject, device,
     for layer_id in range(n_lay):
         def make_patch(lid):
             def hook(mod, inp, out):
-                o = out[0].clone()
+                hs, rest = _unwrap_hidden(out)
+                o = hs.clone()
                 o[0, patch_pos[0]] = clean_states[lid][0, patch_pos[0]]
-                return (o,) + out[1:]
+                return o if rest is None else (o,) + rest
             return hook
 
         patch_pos = [0]  # mutable cell for closure
@@ -617,32 +630,42 @@ def _(trace_btn, current_fact, trace_samples_ui,
         trace_result = None
         trace_view = mo.md("Load the model and pick a fact first.").callout(kind="warn")
     else:
-        with mo.status.spinner(title="Running causal trace… (~20–40 s)"):
-            _scores, _tokens, _srange = causal_trace(
-                model, tokenizer,
-                current_fact["prompt"], current_fact["subject"], DEVICE,
-                n_corrupt=trace_samples_ui.value,
-            )
+        try:
+            with mo.status.spinner(title="Running causal trace… (~20–40 s)"):
+                _scores, _tokens, _srange = causal_trace(
+                    model, tokenizer,
+                    current_fact["prompt"], current_fact["subject"], DEVICE,
+                    n_corrupt=trace_samples_ui.value,
+                )
 
-        _sl      = _srange[1] - 1
-        _top_lay = int(_scores[_sl, :].argmax())
-        _top_scr = float(_scores[_sl, :].max())
+            _sl      = _srange[1] - 1
+            _top_lay = int(_scores[_sl, :].argmax())
+            _top_scr = float(_scores[_sl, :].max())
 
-        trace_result = {
-            "scores":    _scores,
-            "tokens":    _tokens,
-            "srange":    _srange,
-            "top_layer": _top_lay,
-            "top_score": _top_scr,
-            "prompt":    current_fact["prompt"],
-        }
-        trace_view = mo.md(
-            f"✅ **Trace complete.** "
-            f"Shape `{_scores.shape}` (tokens × layers) · "
-            f"Peak: **layer {_top_lay}** "
-            f"(indirect effect = {_top_scr:.3f}) — "
-            f"click that cell below, or any other, to target it."
-        ).callout(kind="success")
+            trace_result = {
+                "scores":    _scores,
+                "tokens":    _tokens,
+                "srange":    _srange,
+                "top_layer": _top_lay,
+                "top_score": _top_scr,
+                "prompt":    current_fact["prompt"],
+            }
+            trace_view = mo.md(
+                f"✅ **Trace complete.** "
+                f"Shape `{_scores.shape}` (tokens × layers) · "
+                f"Peak: **layer {_top_lay}** "
+                f"(indirect effect = {_top_scr:.3f}) — "
+                f"click that cell below, or any other, to target it."
+            ).callout(kind="success")
+        except Exception as _exc:
+            trace_result = None
+            trace_view = mo.md(
+                f"❌ **Causal trace failed:** `{type(_exc).__name__}: {_exc}`\n\n"
+                f"This is the from-scratch implementation hooking "
+                f"`model.transformer.h[layer]` directly — share this exact "
+                f"message so the hook logic can be corrected against the "
+                f"real output shape."
+            ).callout(kind="danger")
 
     trace_view
     return trace_result, trace_view
@@ -977,60 +1000,67 @@ def _(edit_btn, current_fact, edit_target_ui, selected_layer, ROME_LAYER_DEFAULT
             mo.md("Load the model in Step 1.").callout(kind="warn")
         )
     else:
-        _target = edit_target_ui.value.strip()
-        _layer  = selected_layer if selected_layer is not None else ROME_LAYER_DEFAULT
-        _request = {**current_fact, "new": _target}
+        try:
+            _target = edit_target_ui.value.strip()
+            _layer  = selected_layer if selected_layer is not None else ROME_LAYER_DEFAULT
+            _request = {**current_fact, "new": _target}
 
-        _all_prompts = (
-            [current_fact["prompt"]]
-            + current_fact["gen"]
-            + current_fact["spec"]
-            + current_fact["coh"]
-        )
-        _before = {}
-        with torch.no_grad():
-            for _p in _all_prompts:
-                _inp = tokenizer(_p, return_tensors="pt").to(DEVICE)
-                _before[_p] = tokenizer.decode(
-                    [model(**_inp).logits[0,-1].argmax()]
-                ).strip()
+            _all_prompts = (
+                [current_fact["prompt"]]
+                + current_fact["gen"]
+                + current_fact["spec"]
+                + current_fact["coh"]
+            )
+            _before = {}
+            with torch.no_grad():
+                for _p in _all_prompts:
+                    _inp = tokenizer(_p, return_tensors="pt").to(DEVICE)
+                    _before[_p] = tokenizer.decode(
+                        [model(**_inp).logits[0,-1].argmax()]
+                    ).strip()
 
-        with torch.no_grad():
-            _inp_b   = tokenizer(current_fact["prompt"], return_tensors="pt").to(DEVICE)
-            _probs_b = torch.softmax(model(**_inp_b).logits[0,-1], -1)
-            _tv_b, _ti_b = torch.topk(_probs_b, 6)
-        _before_dist = [
-            {"tok": tokenizer.decode([t]).strip(), "pct": round(float(p)*100, 2)}
-            for t, p in zip(_ti_b, _tv_b)
-        ]
+            with torch.no_grad():
+                _inp_b   = tokenizer(current_fact["prompt"], return_tensors="pt").to(DEVICE)
+                _probs_b = torch.softmax(model(**_inp_b).logits[0,-1], -1)
+                _tv_b, _ti_b = torch.topk(_probs_b, 6)
+            _before_dist = [
+                {"tok": tokenizer.decode([t]).strip(), "pct": round(float(p)*100, 2)}
+                for t, p in zip(_ti_b, _tv_b)
+            ]
 
-        with mo.status.spinner(title="Step 1/3 — Computing key vector…"):
-            _k = rome_key(model, tokenizer, _request["prompt"],
-                         _request["subject"], _layer, DEVICE)
-        with mo.status.spinner(title="Step 2/3 — Optimising value vector…"):
-            _v = rome_value(model, tokenizer, _request, _layer, _k, DEVICE)
-        with mo.status.spinner(title="Step 3/3 — Applying rank-one weight update…"):
-            rome_apply(model, _layer, _k, _v)
-            model.eval()
+            with mo.status.spinner(title="Step 1/3 — Computing key vector…"):
+                _k = rome_key(model, tokenizer, _request["prompt"],
+                             _request["subject"], _layer, DEVICE)
+            with mo.status.spinner(title="Step 2/3 — Optimising value vector…"):
+                _v = rome_value(model, tokenizer, _request, _layer, _k, DEVICE)
+            with mo.status.spinner(title="Step 3/3 — Applying rank-one weight update…"):
+                rome_apply(model, _layer, _k, _v)
+                model.eval()
 
-        with torch.no_grad():
-            _inp_a   = tokenizer(current_fact["prompt"], return_tensors="pt").to(DEVICE)
-            _probs_a = torch.softmax(model(**_inp_a).logits[0,-1], -1)
-            _tv_a, _ti_a = torch.topk(_probs_a, 6)
-        _after_dist = [
-            {"tok": tokenizer.decode([t]).strip(), "pct": round(float(p)*100, 2)}
-            for t, p in zip(_ti_a, _tv_a)
-        ]
+            with torch.no_grad():
+                _inp_a   = tokenizer(current_fact["prompt"], return_tensors="pt").to(DEVICE)
+                _probs_a = torch.softmax(model(**_inp_a).logits[0,-1], -1)
+                _tv_a, _ti_a = torch.topk(_probs_a, 6)
+            _after_dist = [
+                {"tok": tokenizer.decode([t]).strip(), "pct": round(float(p)*100, 2)}
+                for t, p in zip(_ti_a, _tv_a)
+            ]
 
-        edit_result = {
-            "before": _before, "before_dist": _before_dist,
-            "after_dist": _after_dist, "fact": current_fact,
-            "target": _target, "layer": _layer,
-        }
-        edit_exec_view = mo.md(
-            f"✅ **Done.** Layer {_layer} (your heatmap selection) · "
-            f"*{current_fact['subject']}* → **{_target}**"
-        ).callout(kind="success")
+            edit_result = {
+                "before": _before, "before_dist": _before_dist,
+                "after_dist": _after_dist, "fact": current_fact,
+                "target": _target, "layer": _layer,
+            }
+            edit_exec_view = mo.md(
+                f"✅ **Done.** Layer {_layer} (your heatmap selection) · "
+                f"*{current_fact['subject']}* → **{_target}**"
+            ).callout(kind="success")
+        except Exception as _exc:
+            edit_result = None
+            edit_exec_view = mo.md(
+                f"❌ **Edit failed:** `{type(_exc).__name__}: {_exc}`\n\n"
+                f"Share this exact message to pin down the fix."
+            ).callout(kind="danger")
 
     edit_exec_view
     return (edit_result,)
