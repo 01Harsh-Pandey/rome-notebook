@@ -543,8 +543,28 @@ def _(trace_btn, current_fact, trace_samples_ui,
             else:
                 _res = _tr.calculate_hidden_flow(**_call_kwargs)
 
-                # Verified shape: (n_tokens, n_layers)
-                _scores = _res.scores.numpy()
+                # The (n_tokens, n_layers) shape was confirmed against the
+                # OLD CausalTracer(model_name) constructor. This install's
+                # constructor already changed once (now needs model+
+                # tokenizer), so the array orientation isn't re-verified
+                # for this version. Rather than assume it, normalize
+                # against the one structural invariant we do know:
+                # GPT-2 XL has exactly 48 transformer layers.
+                _scores_raw = _res.scores.numpy()
+                _n_layers_expected = model.config.n_layer  # 48 for gpt2-xl
+
+                if (_scores_raw.ndim == 2
+                        and _scores_raw.shape[0] == _n_layers_expected
+                        and _scores_raw.shape[1] != _n_layers_expected):
+                    _scores = _scores_raw.T   # was (layers, tokens) → flip
+                    _shape_note = (
+                        f"raw shape `{_scores_raw.shape}` looked like "
+                        f"(layers, tokens) — transposed to "
+                    )
+                else:
+                    _scores = _scores_raw
+                    _shape_note = "raw shape already "
+
                 _tokens = list(_res.input_tokens)
                 _srange = tuple(_res.subject_range)
                 del _tr
@@ -565,7 +585,7 @@ def _(trace_btn, current_fact, trace_samples_ui,
                 }
                 trace_view = mo.md(
                     f"✅ **Trace complete.** "
-                    f"Shape `{_scores.shape}` (tokens × layers) · "
+                    f"{_shape_note}`{_scores.shape}` (tokens × layers) · "
                     f"Paper-predicted peak: **layer {_top_lay}** "
                     f"(indirect effect = {_top_scr:.3f}) — "
                     f"click that cell below, or any other, to target it."
@@ -1245,7 +1265,7 @@ def _(mo):
     **Paper:** [arxiv.org/abs/2202.05262](https://arxiv.org/abs/2202.05262)
     · Meng, Bau, Andonian & Belinkov · NeurIPS 2022
     **Code:** [github.com/kmeng01/rome](https://github.com/kmeng01/rome)
-    **Notebook:** alphaXiv × marimo GPU Notebook Competition #2
+    **Notebook:** alphaXiv × marimo GPU Notebook Competition#2
     """)
     return
 
