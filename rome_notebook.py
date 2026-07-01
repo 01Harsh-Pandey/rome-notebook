@@ -5,7 +5,6 @@
 #   "torch>=2.0.0",
 #   "transformers>=4.30.0",
 #   "accelerate>=0.20.0",
-#   "causal-tracer>=1.1.0",
 #   "anywidget>=0.9.0",
 #   "traitlets>=5.0",
 #   "numpy>=1.24",
@@ -24,7 +23,6 @@ app = marimo.App(width="medium", auto_download=["html"])
 
 @app.cell(hide_code=True)
 def _():
-    import inspect
     import json
 
     import anywidget
@@ -40,7 +38,7 @@ def _():
         torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU"
     )
     return (
-        anywidget, inspect, json, np, torch, traitlets,
+        anywidget, json, np, torch, traitlets,
         AutoModelForCausalLM, AutoTokenizer,
         mo, DEVICE, GPU_NAME,
     )
@@ -491,9 +489,125 @@ def _(mo):
     return (trace_btn,)
 
 
+@app.function
+def rome_subject_range(tokenizer, prompt, subject):
+    """Return (start, end) exclusive token indices of subject in prompt."""
+    full = tokenizer.encode(prompt)
+    for prefix in (" " + subject, subject):
+        sub = tokenizer.encode(prefix)
+        for i in range(len(full) - len(sub) + 1):
+            if full[i:i+len(sub)] == sub:
+                return i, i + len(sub)
+    return 0, 1
+
+
+@app.function
+def causal_trace(model, tokenizer, prompt, subject, device,
+                  n_corrupt=10, noise_coef=3.0):
+    """
+    From-scratch causal mediation analysis (Meng et al. 2022, Section 3).
+
+    We do NOT rely on the external causal-tracer package: its installed
+    version's noise-magnitude kwarg name doesn't match anything this
+    notebook tried (noise/noise_level/noise_std/std/sigma all rejected),
+    which silently ran the corruption step with zero noise and produced
+    meaningless near-zero indirect effects across the board. This
+    implementation uses the exact same forward-hook pattern already
+    verified working in rome_key/rome_value/rome_apply below.
+
+    Returns:
+      scores  : np.ndarray, shape (n_tokens, n_layers) — indirect effect
+      tokens  : list[str] — decoded prompt tokens
+      srange  : (start, end) exclusive — subject token span
+    """
+    import torch
+    import numpy as np
+
+    s, e   = rome_subject_range(tokenizer, prompt, subject)
+    inputs = tokenizer(prompt, return_tensors="pt").to(device)
+    n_tok  = inputs["input_ids"].shape[1]
+    n_lay  = model.config.n_layer
+    noise_std = noise_coef * model.transformer.wte.weight.std().item()
+
+    # Target: the model's own top prediction on the clean run — this is
+    # the "fact" we're tracing, whatever it currently answers.
+    with torch.no_grad():
+        clean_logits = model(**inputs).logits[0, -1, :]
+        target_tok   = int(clean_logits.argmax())
+        p_clean      = float(torch.softmax(clean_logits, dim=-1)[target_tok])
+
+    def noise_hook(mod, inp, out):
+        o = out.clone()
+        o[0, s:e] += torch.randn_like(o[0, s:e]) * noise_std
+        return o
+
+    # ── Corrupted baseline: noise on subject embeddings, no patching ──────
+    p_corrupt_runs = []
+    for _ in range(n_corrupt):
+        h = model.transformer.wte.register_forward_hook(noise_hook)
+        with torch.no_grad():
+            logits = model(**inputs).logits[0, -1, :]
+        h.remove()
+        p_corrupt_runs.append(
+            float(torch.softmax(logits, dim=-1)[target_tok])
+        )
+    p_corrupt = sum(p_corrupt_runs) / len(p_corrupt_runs)
+
+    scores = np.zeros((n_tok, n_lay), dtype=np.float32)
+    denom  = max(p_clean - p_corrupt, 1e-4)  # guard against near-zero gap
+
+    # ── Capture clean hidden states at every layer (for patching) ────────
+    clean_states = {}
+
+    def make_capture(layer_idx):
+        def hook(mod, inp, out):
+            clean_states[layer_idx] = out[0].detach().clone()
+        return hook
+
+    caps = [
+        model.transformer.h[l].register_forward_hook(make_capture(l))
+        for l in range(n_lay)
+    ]
+    with torch.no_grad():
+        model(**inputs)
+    for h in caps:
+        h.remove()
+
+    # ── Patch each (layer, token) cell: corrupt + restore one position ───
+    for layer_id in range(n_lay):
+        def make_patch(lid):
+            def hook(mod, inp, out):
+                o = out[0].clone()
+                o[0, patch_pos[0]] = clean_states[lid][0, patch_pos[0]]
+                return (o,) + out[1:]
+            return hook
+
+        patch_pos = [0]  # mutable cell for closure
+        h_noise = model.transformer.wte.register_forward_hook(noise_hook)
+        h_patch = model.transformer.h[layer_id].register_forward_hook(
+            make_patch(layer_id)
+        )
+        for tok_pos in range(n_tok):
+            patch_pos[0] = tok_pos
+            with torch.no_grad():
+                logits = model(**inputs).logits[0, -1, :]
+            p_restored = float(torch.softmax(logits, dim=-1)[target_tok])
+            scores[tok_pos, layer_id] = max(
+                0.0, min(1.0, (p_restored - p_corrupt) / denom)
+            )
+        h_noise.remove()
+        h_patch.remove()
+
+    tokens = [
+        tokenizer.decode([t]).strip() or "·"
+        for t in inputs["input_ids"][0]
+    ]
+    return scores, tokens, (s, e)
+
+
 @app.cell(hide_code=True)
 def _(trace_btn, current_fact, trace_samples_ui,
-      MODEL_NAME, model, tokenizer, torch, inspect, mo):
+      model, tokenizer, DEVICE, causal_trace, mo):
     if not trace_btn.value:
         trace_result = None
         trace_view = mo.md(
@@ -503,93 +617,32 @@ def _(trace_btn, current_fact, trace_samples_ui,
         trace_result = None
         trace_view = mo.md("Load the model and pick a fact first.").callout(kind="warn")
     else:
-        with mo.status.spinner(title="Running causal trace… (~60 s)"):
-            from causal_tracer import CausalTracer
+        with mo.status.spinner(title="Running causal trace… (~20–40 s)"):
+            _scores, _tokens, _srange = causal_trace(
+                model, tokenizer,
+                current_fact["prompt"], current_fact["subject"], DEVICE,
+                n_corrupt=trace_samples_ui.value,
+            )
 
-            # Reuse the already-loaded model/tokenizer — no extra VRAM.
-            _tr = CausalTracer(model, tokenizer)
+        _sl      = _srange[1] - 1
+        _top_lay = int(_scores[_sl, :].argmax())
+        _top_scr = float(_scores[_sl, :].max())
 
-            # The installed causal-tracer version's method signature isn't
-            # guaranteed across releases (its constructor already differs
-            # from older docs). Introspect the real signature rather than
-            # hard-coding kwarg names, so this notebook tolerates version
-            # drift instead of crashing on it.
-            _sig    = inspect.signature(_tr.calculate_hidden_flow)
-            _params = set(_sig.parameters.keys())
-            _candidates = {
-                "prompt":      current_fact["prompt"],
-                "subject":     current_fact["subject"],
-                "samples":     trace_samples_ui.value,
-                "noise":       0.13,
-                "noise_level": 0.13,
-                "noise_std":   0.13,
-                "std":         0.13,
-                "sigma":       0.13,
-            }
-            _call_kwargs = {k: v for k, v in _candidates.items() if k in _params}
-            _missing = [
-                p.name for p in _sig.parameters.values()
-                if p.default is inspect.Parameter.empty
-                and p.name not in _call_kwargs and p.name != "self"
-            ]
-
-            if _missing:
-                trace_result = None
-                trace_view = mo.md(
-                    f"⚠️ **API mismatch.** This installed `causal-tracer` needs "
-                    f"`{_missing}`, which this notebook doesn't supply. "
-                    f"Detected signature: `{_sig}`."
-                ).callout(kind="danger")
-            else:
-                _res = _tr.calculate_hidden_flow(**_call_kwargs)
-
-                # The (n_tokens, n_layers) shape was confirmed against the
-                # OLD CausalTracer(model_name) constructor. This install's
-                # constructor already changed once (now needs model+
-                # tokenizer), so the array orientation isn't re-verified
-                # for this version. Rather than assume it, normalize
-                # against the one structural invariant we do know:
-                # GPT-2 XL has exactly 48 transformer layers.
-                _scores_raw = _res.scores.numpy()
-                _n_layers_expected = model.config.n_layer  # 48 for gpt2-xl
-
-                if (_scores_raw.ndim == 2
-                        and _scores_raw.shape[0] == _n_layers_expected
-                        and _scores_raw.shape[1] != _n_layers_expected):
-                    _scores = _scores_raw.T   # was (layers, tokens) → flip
-                    _shape_note = (
-                        f"raw shape `{_scores_raw.shape}` looked like "
-                        f"(layers, tokens) — transposed to "
-                    )
-                else:
-                    _scores = _scores_raw
-                    _shape_note = "raw shape already "
-
-                _tokens = list(_res.input_tokens)
-                _srange = tuple(_res.subject_range)
-                del _tr
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-
-                _sl      = _srange[1] - 1
-                _top_lay = int(_scores[_sl, :].argmax())
-                _top_scr = float(_scores[_sl, :].max())
-
-                trace_result = {
-                    "scores":    _scores,
-                    "tokens":    _tokens,
-                    "srange":    _srange,
-                    "top_layer": _top_lay,
-                    "top_score": _top_scr,
-                    "prompt":    current_fact["prompt"],
-                }
-                trace_view = mo.md(
-                    f"✅ **Trace complete.** "
-                    f"{_shape_note}`{_scores.shape}` (tokens × layers) · "
-                    f"Paper-predicted peak: **layer {_top_lay}** "
-                    f"(indirect effect = {_top_scr:.3f}) — "
-                    f"click that cell below, or any other, to target it."
-                ).callout(kind="success")
+        trace_result = {
+            "scores":    _scores,
+            "tokens":    _tokens,
+            "srange":    _srange,
+            "top_layer": _top_lay,
+            "top_score": _top_scr,
+            "prompt":    current_fact["prompt"],
+        }
+        trace_view = mo.md(
+            f"✅ **Trace complete.** "
+            f"Shape `{_scores.shape}` (tokens × layers) · "
+            f"Peak: **layer {_top_lay}** "
+            f"(indirect effect = {_top_scr:.3f}) — "
+            f"click that cell below, or any other, to target it."
+        ).callout(kind="success")
 
     trace_view
     return trace_result, trace_view
@@ -842,17 +895,6 @@ def _(mo):
 
 
 # ── ROME helpers ───────────────────────────────────────────────────────────
-
-@app.function
-def rome_subject_range(tokenizer, prompt, subject):
-    full = tokenizer.encode(prompt)
-    for prefix in (" " + subject, subject):
-        sub = tokenizer.encode(prefix)
-        for i in range(len(full) - len(sub) + 1):
-            if full[i:i+len(sub)] == sub:
-                return i, i + len(sub)
-    return 0, 1
-
 
 @app.function
 def rome_key(model, tokenizer, prompt, subject, layer, device, n=20, coef=3.0):
@@ -1265,7 +1307,7 @@ def _(mo):
     **Paper:** [arxiv.org/abs/2202.05262](https://arxiv.org/abs/2202.05262)
     · Meng, Bau, Andonian & Belinkov · NeurIPS 2022
     **Code:** [github.com/kmeng01/rome](https://github.com/kmeng01/rome)
-    **Notebook:** alphaXiv × marimo GPU Notebook Competition#2
+    **Notebook:** alphaXiv × marimo GPU Notebook Competition #2
     """)
     return
 
