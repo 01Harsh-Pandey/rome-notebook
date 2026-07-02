@@ -480,9 +480,16 @@ def _(mo):
 
 @app.cell(hide_code=True)
 def _(mo):
+    # Controls n_patch_samples: how many independent noise draws are
+    # averaged PER (layer, token) cell. Previously this slider only
+    # affected the single-scalar corrupted baseline and had ZERO effect
+    # on per-cell heatmap stability despite its label — that mismatch is
+    # fixed now. Cost scales as n_tokens × 48 layers × this value, so the
+    # range is smaller than before: each +1 here roughly adds another
+    # full pass over the entire heatmap.
     trace_samples_ui = mo.ui.slider(
-        10, 40, value=20, step=5, show_value=True,
-        label="Noise samples  (higher → smoother heatmap, slower)",
+        1, 5, value=3, step=1, show_value=True,
+        label="Samples averaged per heatmap cell  (higher → less noisy, slower)",
     )
     trace_samples_ui
     return (trace_samples_ui,)
@@ -491,7 +498,7 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     trace_btn = mo.ui.run_button(
-        label="🔍  Run Causal Trace  (~60 s)",
+        label="🔍  Run Causal Trace  (~60–150 s)",
         kind="warn", full_width=True,
     )
     trace_btn
@@ -512,7 +519,7 @@ def rome_subject_range(tokenizer, prompt, subject):
 
 @app.function
 def causal_trace(model, tokenizer, prompt, subject, device,
-                  n_corrupt=10, noise_coef=3.0):
+                  n_corrupt=15, n_patch_samples=3, noise_coef=3.0):
     """
     From-scratch causal mediation analysis (Meng et al. 2022, Section 3).
 
@@ -524,6 +531,19 @@ def causal_trace(model, tokenizer, prompt, subject, device,
     implementation uses the exact same forward-hook pattern already
     verified working in rome_key/rome_value/rome_apply below.
 
+    CRITICAL: noise_hook draws a FRESH torch.randn_like() sample every
+    time it fires. The corrupted-baseline loop already averages over
+    n_corrupt draws to get a stable p_corrupt. Each (layer, token) PATCH
+    cell must be averaged the same way — a single noisy draw per cell
+    produces wildly irreproducible results (confirmed empirically: the
+    same fact re-traced gave peak layer 12 in one run and peak layer 2
+    in another, and a single run showed indirect effect 0.010 at the
+    subject's own last token while an unrelated cell in the same
+    heatmap showed 0.963 — both symptoms of single-sample variance, not
+    genuine signal). n_patch_samples fixes this by averaging multiple
+    corrupted+patched forward passes per cell, exactly like the
+    baseline already does.
+
     Returns:
       scores  : np.ndarray, shape (n_tokens, n_layers) — indirect effect
       tokens  : list[str] — decoded prompt tokens
@@ -531,10 +551,7 @@ def causal_trace(model, tokenizer, prompt, subject, device,
       diag    : dict with p_clean, p_corrupt, target_tok_str — lets the
                 caller verify the corruption actually suppressed the
                 prediction (denom = p_clean - p_corrupt), rather than
-                trusting a high indirect-effect number blindly. A near-
-                zero denom would silently inflate every score toward the
-                clip bounds, exactly as happened with the earlier
-                external causal-tracer bug.
+                trusting a high indirect-effect number blindly.
     """
     import torch
     import numpy as np
@@ -602,6 +619,8 @@ def causal_trace(model, tokenizer, prompt, subject, device,
         h.remove()
 
     # ── Patch each (layer, token) cell: corrupt + restore one position ───
+    # Averaged over n_patch_samples independent noise draws per cell —
+    # see the docstring above for why a single draw is not enough.
     for layer_id in range(n_lay):
         def make_patch(lid):
             def hook(mod, inp, out):
@@ -618,9 +637,14 @@ def causal_trace(model, tokenizer, prompt, subject, device,
         )
         for tok_pos in range(n_tok):
             patch_pos[0] = tok_pos
-            with torch.no_grad():
-                logits = model(**inputs).logits[0, -1, :]
-            p_restored = float(torch.softmax(logits, dim=-1)[target_tok])
+            _p_restored_runs = []
+            for _ in range(n_patch_samples):
+                with torch.no_grad():
+                    logits = model(**inputs).logits[0, -1, :]
+                _p_restored_runs.append(
+                    float(torch.softmax(logits, dim=-1)[target_tok])
+                )
+            p_restored = sum(_p_restored_runs) / len(_p_restored_runs)
             scores[tok_pos, layer_id] = max(
                 0.0, min(1.0, (p_restored - p_corrupt) / denom)
             )
@@ -637,6 +661,7 @@ def causal_trace(model, tokenizer, prompt, subject, device,
         "denom":          denom,
         "target_tok_str": tokenizer.decode([target_tok]).strip(),
         "n_subject_tok":  e - s,
+        "n_patch_samples": n_patch_samples,
     }
     return scores, tokens, (s, e), diag
 
@@ -654,11 +679,11 @@ def _(trace_btn, current_fact, trace_samples_ui,
         trace_view = mo.md("Load the model and pick a fact first.").callout(kind="warn")
     else:
         try:
-            with mo.status.spinner(title="Running causal trace… (~20–40 s)"):
+            with mo.status.spinner(title="Running causal trace… (~60–150 s)"):
                 _scores, _tokens, _srange, _diag = causal_trace(
                     model, tokenizer,
                     current_fact["prompt"], current_fact["subject"], DEVICE,
-                    n_corrupt=trace_samples_ui.value,
+                    n_patch_samples=trace_samples_ui.value,
                 )
 
             _sl      = _srange[1] - 1
@@ -897,10 +922,27 @@ def _(heatmap_widget, trace_result, mo):
         _delta  = abs(selected_layer - _peak_l)
         _tok    = trace_result["tokens"][selected_token]
 
+        # ROME always edits at the SUBJECT'S OWN last token internally
+        # (rome_key/rome_value compute this via rome_subject_range,
+        # independent of whatever token column was clicked here). The
+        # heatmap's token axis is for exploring where causal signal
+        # concentrates across ALL positions — only the LAYER you click
+        # actually transfers to the edit below.
+        _subj_last_idx = trace_result["srange"][1] - 1
+        _token_note = (
+            f"\n\n*Note: you clicked token \"{_tok}\" — only the **layer** "
+            f"carries through to the edit below. ROME always targets the "
+            f"subject's own last token internally "
+            f"(\"{trace_result['tokens'][_subj_last_idx]}\"), regardless "
+            f"of which column you click.*"
+            if selected_token != _subj_last_idx else ""
+        )
+
         if _delta == 0:
             _msg, _kind = (
                 f"**You selected the paper-predicted peak** — layer {selected_layer}, "
-                f"token \"{_tok}\". This is the strongest causal address for this fact.",
+                f"token \"{_tok}\". This is the strongest causal address for this fact."
+                f"{_token_note}",
                 "success",
             )
         elif _delta <= 3:
@@ -908,7 +950,8 @@ def _(heatmap_widget, trace_result, mo):
                 f"**Selected layer {selected_layer}**, token \"{_tok}\" — "
                 f"{_delta} layers from the paper's peak (layer {_peak_l}). "
                 f"Still inside the causal band; the edit should work, "
-                f"just slightly less precisely targeted.",
+                f"just slightly less precisely targeted."
+                f"{_token_note}",
                 "neutral",
             )
         else:
@@ -917,7 +960,8 @@ def _(heatmap_widget, trace_result, mo):
                 f"{_delta} layers from the paper's peak (layer {_peak_l}). "
                 f"This is outside the band the heatmap lit up; expect a "
                 f"weaker or less reliable edit. Click a brighter cell to "
-                f"see the difference.",
+                f"see the difference."
+                f"{_token_note}",
                 "warn",
             )
         select_view = mo.md(_msg).callout(kind=_kind)
