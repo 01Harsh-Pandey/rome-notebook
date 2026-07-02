@@ -528,6 +528,13 @@ def causal_trace(model, tokenizer, prompt, subject, device,
       scores  : np.ndarray, shape (n_tokens, n_layers) — indirect effect
       tokens  : list[str] — decoded prompt tokens
       srange  : (start, end) exclusive — subject token span
+      diag    : dict with p_clean, p_corrupt, target_tok_str — lets the
+                caller verify the corruption actually suppressed the
+                prediction (denom = p_clean - p_corrupt), rather than
+                trusting a high indirect-effect number blindly. A near-
+                zero denom would silently inflate every score toward the
+                clip bounds, exactly as happened with the earlier
+                external causal-tracer bug.
     """
     import torch
     import numpy as np
@@ -624,7 +631,14 @@ def causal_trace(model, tokenizer, prompt, subject, device,
         tokenizer.decode([t]).strip() or "·"
         for t in inputs["input_ids"][0]
     ]
-    return scores, tokens, (s, e)
+    diag = {
+        "p_clean":        p_clean,
+        "p_corrupt":      p_corrupt,
+        "denom":          denom,
+        "target_tok_str": tokenizer.decode([target_tok]).strip(),
+        "n_subject_tok":  e - s,
+    }
+    return scores, tokens, (s, e), diag
 
 
 @app.cell(hide_code=True)
@@ -641,7 +655,7 @@ def _(trace_btn, current_fact, trace_samples_ui,
     else:
         try:
             with mo.status.spinner(title="Running causal trace… (~20–40 s)"):
-                _scores, _tokens, _srange = causal_trace(
+                _scores, _tokens, _srange, _diag = causal_trace(
                     model, tokenizer,
                     current_fact["prompt"], current_fact["subject"], DEVICE,
                     n_corrupt=trace_samples_ui.value,
@@ -658,13 +672,53 @@ def _(trace_btn, current_fact, trace_samples_ui,
                 "top_layer": _top_lay,
                 "top_score": _top_scr,
                 "prompt":    current_fact["prompt"],
+                "diag":      _diag,
             }
+
+            # Verify the corruption gap is real, not a near-zero denominator
+            # masquerading as a high score (the exact failure mode of the
+            # earlier external causal-tracer bug). A healthy gap is at
+            # least a few percentage points; anything smaller means the
+            # indirect-effect ratio is numerically unstable regardless of
+            # what layer it points to.
+            _gap_pct = (_diag["p_clean"] - _diag["p_corrupt"]) * 100
+            _gap_note = (
+                f"Corruption gap: P({_diag['target_tok_str']!r}) "
+                f"{_diag['p_clean']:.3f} clean → {_diag['p_corrupt']:.3f} "
+                f"corrupted ({_gap_pct:.1f} pts — "
+                + ("healthy, scores are meaningful)"
+                   if _gap_pct > 3 else
+                   "⚠️ thin — treat scores with caution)")
+            )
+
+            # Single-token, sentence-initial subjects (e.g. "Microsoft")
+            # have no earlier token to attend back to under causal masking,
+            # so patching their own position at ANY layer — even the very
+            # first — fully undoes the corruption immediately. This makes
+            # very-early peaks for such subjects architecturally expected,
+            # not evidence of where the fact is "stored" in the sense the
+            # paper means for multi-token subjects.
+            _single_tok_note = ""
+            if _diag["n_subject_tok"] == 1 and _srange[0] == 0 and _top_lay <= 3:
+                _single_tok_note = (
+                    "\n\n⚠️ **Single-token, sentence-initial subject.** "
+                    "Under causal attention this token has nothing earlier "
+                    "to attend back to, so restoring it at *any* layer — "
+                    "even layer 1 — fully undoes the corruption immediately. "
+                    "This peak reflects that architectural fact more than "
+                    "it reveals a meaningful mid-stack storage layer. "
+                    "Compare to a multi-token subject (Eiffel Tower, "
+                    "LeBron James) for the paper's intended signal."
+                )
+
             trace_view = mo.md(
                 f"✅ **Trace complete.** "
                 f"Shape `{_scores.shape}` (tokens × layers) · "
                 f"Peak: **layer {_top_lay}** "
                 f"(indirect effect = {_top_scr:.3f}) — "
-                f"click that cell below, or any other, to target it."
+                f"click that cell below, or any other, to target it.\n\n"
+                f"{_gap_note}"
+                f"{_single_tok_note}"
             ).callout(kind="success")
         except Exception as _exc:
             trace_result = None
