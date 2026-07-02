@@ -345,12 +345,21 @@ def _(load_btn, MODEL_NAME, DEVICE,
                 MODEL_NAME, torch_dtype=torch.float32,
             ).to(DEVICE)
             model.eval()
+            # ROME's edit is a direct in-place weight write (rome_apply),
+            # never gradient descent on the model itself — only the value
+            # vector `v` in rome_value ever needs gradients. Without this,
+            # every loss.backward() call in rome_value silently allocates
+            # a full .grad buffer for all 1.5B model parameters (~6.4 GB),
+            # on top of the weights themselves, for zero benefit.
+            for _p in model.parameters():
+                _p.requires_grad_(False)
         _vram = (
             f"{torch.cuda.memory_allocated()/1e9:.1f} GB VRAM"
             if DEVICE == "cuda" else "CPU"
         )
         load_view = mo.md(
-            f"✅ **Loaded.** GPT-2 XL on `{DEVICE}` · {_vram}"
+            f"✅ **Loaded.** GPT-2 XL on `{DEVICE}` · {_vram} · "
+            f"parameters frozen (gradients only ever flow to the value vector)"
         ).callout(kind="success")
 
     load_view
@@ -1237,21 +1246,36 @@ def _(edit_result, model, tokenizer, DEVICE, torch, mo):
 # ─────────────────────────────────────────────────────────────────────────────
 
 @app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
+def _(edit_result, mo):
+    _intro = r"""
     ---
     ## Extension: Edit Coherence *(novel — not in the paper)*
 
     ROME measures efficacy, generalization, and specificity. It never asks:
     do *logically entailed* facts cascade?
+    """
 
-    If we rewrite *"Eiffel Tower is in Paris"* → Rome, a coherent model
-    should also shift "the **country** containing the Eiffel Tower" from
-    France to Italy, and "the **language** spoken" from French to Italian.
-    ROME is a rank-one update at one layer — there's no mechanism that
-    guarantees this cascade. The **Edit Coherence Score** measures how
-    often it happens anyway.
-    """)
+    if edit_result is None:
+        _example = (
+            "If we rewrite *\"Eiffel Tower is in Paris\"* → Rome, a coherent "
+            "model should also shift \"the **country** containing the Eiffel "
+            "Tower\" from France to Italy, and \"the **language** spoken\" "
+            "from French to Italian."
+        )
+    else:
+        _subj = edit_result["fact"]["subject"]
+        _true = edit_result["fact"]["true"]
+        _new  = edit_result["target"]
+        _example = (
+            f"You just rewrote *\"{_subj} — {_true}\"* → **{_new}**. "
+            f"A coherent model would also update every fact that logically "
+            f"depends on this one — not just the fact itself."
+        )
+
+    mo.md(_intro + "\n\n" + _example + "\n\n"
+          "ROME is a rank-one update at one layer — there's no mechanism "
+          "that guarantees this cascade. The **Edit Coherence Score** "
+          "measures how often it happens anyway, for *this specific edit*.")
     return
 
 
