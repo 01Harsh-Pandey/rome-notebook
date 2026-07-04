@@ -1160,7 +1160,15 @@ def _(edit_btn, current_fact, edit_target_ui, selected_layer, ROME_LAYER_DEFAULT
             }
             edit_exec_view = mo.md(
                 f"✅ **Done.** Layer {_layer} (your heatmap selection) · "
-                f"*{current_fact['subject']}* → **{_target}**"
+                f"*{current_fact['subject']}* → **{_target}**\n\n"
+                f"⚠️ *The causal trace and corruption-gap numbers in Step 3 "
+                f"above now describe the model **before** this edit — "
+                f"`rome_apply` mutates the model's weights in place, which "
+                f"marimo's reactivity can't detect, so that trace does not "
+                f"auto-refresh. Click* Run Causal Trace *again if you want "
+                f"a trace of the model's current (now-edited) state. To "
+                f"start over on a clean model, click* Load GPT-2 XL *again "
+                f"in Step 1, then re-run trace/edit as needed.*"
             ).callout(kind="success")
         except Exception as _exc:
             edit_result = None
