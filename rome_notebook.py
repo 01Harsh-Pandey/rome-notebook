@@ -359,7 +359,14 @@ def _(load_btn, MODEL_NAME, DEVICE,
         )
         load_view = mo.md(
             f"✅ **Loaded.** GPT-2 XL on `{DEVICE}` · {_vram} · "
-            f"parameters frozen (gradients only ever flow to the value vector)"
+            f"parameters frozen (gradients only ever flow to the value vector)\n\n"
+            f"🔄 *This is a fresh, unedited model.* Every ROME edit applied below "
+            f"mutates these weights **permanently for the rest of this session** — "
+            f"testing a second fact (or repeating the same one) without clicking "
+            f"**Load GPT-2 XL** again means it runs on an already-edited model, "
+            f"not this pristine one. For clean, comparable baseline numbers "
+            f"(e.g. \"The Eiffel Tower is located in the city of\" → Paris "
+            f"93.4%), reload here before each isolated test."
         ).callout(kind="success")
 
     load_view
@@ -427,7 +434,13 @@ def _(fact_selector, FACTS_BY_ID, model, tokenizer, DEVICE, torch, mo):
             </div>"""
             for t, p in zip(_tokens, _values)
         )
-        _correct = _tokens[0].strip().lower() == current_fact["true"].lower()
+        # current_fact["true"] may be multi-word ("Paul Allen"), but the
+        # model's top-1 prediction is always exactly one token. An exact
+        # full-string match can never succeed for multi-word answers even
+        # when the model is predicting correctly — compare against just
+        # the true answer's first word instead.
+        _true_first_word = current_fact["true"].split()[0].lower()
+        _correct = _tokens[0].strip().lower() == _true_first_word
 
         fact_view = mo.Html(f"""
         <div style="border:1px solid #d0d7de;border-radius:8px;padding:14px 16px;
