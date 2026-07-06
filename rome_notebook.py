@@ -938,12 +938,40 @@ def _(heatmap_widget, trace_result, mo):
             if selected_token != _subj_last_idx else ""
         )
 
+        # Editing at (or near) the FINAL layer, at a position other than
+        # the sequence's own last token, is architecturally guaranteed to
+        # have near-zero effect: within a transformer block, attention
+        # runs BEFORE the MLP step and uses pre-block values, and the MLP
+        # itself is position-wise (no cross-position mixing). So editing
+        # the subject's position's MLP output has no path to influence a
+        # later readout position within that same block — and if it's
+        # the LAST block, there is no subsequent attention layer left for
+        # that information to travel through at all. This is a real,
+        # provable null case, not a "weaker" edit — flag it distinctly
+        # from the generic off-peak warning above.
+        _n_lay      = trace_result["scores"].shape[1]
+        _n_tok      = len(trace_result["tokens"])
+        _seq_last   = _n_tok - 1
+        _layers_left = _n_lay - 1 - selected_layer
+        _last_layer_note = (
+            f"\n\n🚫 **This layer has essentially no room left to work.** "
+            f"Only {_layers_left} layer(s) remain after layer {selected_layer} "
+            f"before the output is read at token \"{trace_result['tokens'][_seq_last]}\" "
+            f"(position {_seq_last}), which is not the subject's own position. "
+            f"Attention runs *before* the MLP within a block, and MLPs don't "
+            f"mix across positions — so an edit here has little to no path "
+            f"left to reach the readout token. Expect the prediction to be "
+            f"**unchanged, not just weaker**."
+            if (_layers_left <= 1 and _subj_last_idx != _seq_last)
+            else ""
+        )
+
         if _delta == 0:
             _msg, _kind = (
                 f"**You selected the paper-predicted peak** — layer {selected_layer}, "
                 f"token \"{_tok}\". This is the strongest causal address for this fact."
-                f"{_token_note}",
-                "success",
+                f"{_token_note}{_last_layer_note}",
+                "success" if not _last_layer_note else "danger",
             )
         elif _delta <= 3:
             _msg, _kind = (
@@ -951,8 +979,8 @@ def _(heatmap_widget, trace_result, mo):
                 f"{_delta} layers from the paper's peak (layer {_peak_l}). "
                 f"Still inside the causal band; the edit should work, "
                 f"just slightly less precisely targeted."
-                f"{_token_note}",
-                "neutral",
+                f"{_token_note}{_last_layer_note}",
+                "neutral" if not _last_layer_note else "danger",
             )
         else:
             _msg, _kind = (
@@ -961,8 +989,8 @@ def _(heatmap_widget, trace_result, mo):
                 f"This is outside the band the heatmap lit up; expect a "
                 f"weaker or less reliable edit. Click a brighter cell to "
                 f"see the difference."
-                f"{_token_note}",
-                "warn",
+                f"{_token_note}{_last_layer_note}",
+                "warn" if not _last_layer_note else "danger",
             )
         select_view = mo.md(_msg).callout(kind=_kind)
 
