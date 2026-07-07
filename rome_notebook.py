@@ -1237,10 +1237,14 @@ def _(anywidget, traitlets):
               const { before, after, target, prompt } = JSON.parse(raw);
               const maxB = Math.max(...before.map(x => x.pct), .01);
               const maxA = Math.max(...after.map(x => x.pct), .01);
+              // target may be multi-word ("Paul Allen"); a single model
+              // token can only ever match its FIRST word, never the
+              // full phrase, so compare against that instead.
+              const targetFirstWord = target.trim().split(/\s+/)[0].toLowerCase();
 
               function row(item, max, side, idx) {
                 const w   = (item.pct / max * 100).toFixed(1);
-                const hit = item.tok.trim().toLowerCase() === target.trim().toLowerCase();
+                const hit = item.tok.trim().toLowerCase() === targetFirstWord;
                 const bg  = hit
                   ? (side === "after" ? "#16a34a" : "#94a3b8")
                   : (side === "after" ? "#2563eb" : "#94a3b8");
@@ -1341,6 +1345,13 @@ def _(edit_result, model, tokenizer, DEVICE, torch, mo):
         _fact   = edit_result["fact"]
         _target = edit_result["target"]
         _before = edit_result["before"]
+        # The user's typed target may be multi-word ("Paul Allen", "Satya
+        # Nadella"), but the model's greedy top-1 prediction is always
+        # exactly one token. An exact full-string match against a
+        # multi-word target can never succeed even when the model is
+        # predicting the correct first token — compare against the
+        # target's first word instead, exactly like the Step 2 fix above.
+        _target_first_word = _target.strip().split()[0].lower() if _target.strip() else ""
 
         _prompts = (
             [(_fact["prompt"], "✅ Efficacy")]
@@ -1359,7 +1370,7 @@ def _(edit_result, model, tokenizer, DEVICE, torch, mo):
                 if _cat.startswith("🎯"):
                     _v, _vc = ("✅ unchanged", "#16a34a") if not _chg else ("⚠️ changed", "#d97706")
                 else:
-                    _hit = _after.strip().lower() == _target.strip().lower()
+                    _hit = _after.strip().lower() == _target_first_word
                     _v, _vc = ("✅", "#16a34a") if _hit else ("❌", "#dc2626")
 
                 _rows_html += (
